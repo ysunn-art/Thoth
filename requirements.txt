@@ -9,3 +9,4 @@ openai
 pypdf
 python-multipart
 pydantic-settings
+numpy
