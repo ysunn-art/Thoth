@@ -68,7 +68,7 @@ Migrated the codebase from Anthropic SDK + OpenAI embeddings to match the team's
 ## What's NOT done yet
 
 ### Blocked right now
-- **No `.env` file** — need `DATABASE_URL` (Railway or local Postgres) and `BENCHMARK_API_KEY` (self-generated)
+- **`.env` incomplete** — `OPENROUTER_API_KEY` is set, still need `DATABASE_URL` and `BENCHMARK_API_KEY`
 - **Database not created** — `alembic upgrade head` hasn't been run
 - **Dependencies not installed** — `pip install -r requirements.txt` hasn't been run
 - **App never started** — not tested end-to-end yet
@@ -79,11 +79,10 @@ Migrated the codebase from Anthropic SDK + OpenAI embeddings to match the team's
    - Option A: Create a Railway project → add PostgreSQL → copy `DATABASE_URL`
    - Option B: Local Postgres — `createdb thoth_db`
 
-2. **Create `.env`**
+2. **Finish `.env`** (OPENROUTER_API_KEY already done)
    ```
    DATABASE_URL=postgresql+asyncpg://...
    BENCHMARK_API_KEY=...  # generate: python3 -c "import secrets; print(secrets.token_hex(32))"
-   OPENROUTER_API_KEY=sk-or-v1-...
    ```
 
 3. **Install dependencies**
