@@ -10,8 +10,8 @@ Architecture:
   - Persisted to PQ_INDEX_PATH on every upsert so it survives restarts.
 
 Parameters (chosen for benchmark scale):
-  DIM = 1536  (OpenAI text-embedding-3-small)
-  M   = 8     sub-spaces, sub_dim = 192
+  DIM = 384   (all-MiniLM-L6-v2 via sentence-transformers)
+  M   = 8     sub-spaces, sub_dim = 48
   K   = 16    centroids per sub-space (needs >= 16 vectors to train)
 """
 
@@ -19,7 +19,7 @@ import os
 import numpy as np
 from pq import PQIndex
 
-EMBEDDING_DIM = 1536
+EMBEDDING_DIM = 384
 PQ_M = 8
 PQ_K = 16
 MIN_TRAIN_SIZE = PQ_K  # minimum chunks before training

@@ -4,8 +4,8 @@ sqlalchemy[asyncio]
 asyncpg
 alembic
 pgvector
-anthropic
 openai
+sentence-transformers
 pypdf
 python-multipart
 pydantic-settings

@@ -15,7 +15,8 @@ Auth: `Authorization: Bearer <BENCHMARK_API_KEY>` on every request.
 - **ORM**: SQLAlchemy (async) + Alembic for migrations
 - **SQL DB**: PostgreSQL with pgvector extension
 - **Vector search**: pgvector (no separate vector DB service)
-- **LLM**: Anthropic Claude (`claude-sonnet-4-20250514`)
+- **LLM**: OpenRouter via `openai` Python SDK — `anthropic/claude-haiku-4.5` (fast: interviews, routing) + `anthropic/claude-sonnet-4.5` (smart: synthesis, Q&A)
+- **Embeddings**: Local `sentence-transformers` (`all-MiniLM-L6-v2`, 384-dim) — free, no API key needed
 - **File parsing**: pypdf (PDFs), plain read (text/markdown)
 - **Settings**: pydantic-settings (.env)
 - **Server**: Uvicorn
@@ -154,11 +155,11 @@ id          TEXT PRIMARY KEY
 entry_id    TEXT REFERENCES knowledge_entries(id) ON DELETE CASCADE
 chunk_index INTEGER NOT NULL
 chunk_text  TEXT NOT NULL
-embedding   vector(1536)              -- adjust dim to match your embedding model
+embedding   vector(384)               -- all-MiniLM-L6-v2 dimension
 created_at  TIMESTAMPTZ DEFAULT now()
 ```
 
-Index: `CREATE INDEX ON knowledge_chunks USING ivfflat (embedding vector_cosine_ops)`
+Index: `CREATE INDEX ON knowledge_chunks USING hnsw (embedding vector_cosine_ops)`
 
 Only chunks whose parent `knowledge_entries.status = 'approved'` are queried at search time. Filter in the query: join knowledge_entries and check status, or maintain a partial index.
 
@@ -294,7 +295,7 @@ Use pgvector with SQLAlchemy. Steps:
 4. At admin-approve time: chunk the knowledge entry content (e.g. 512 tokens, 50 token overlap), embed each chunk, upsert to `knowledge_chunks`
 5. At purge time: `DELETE FROM knowledge_chunks`
 
-Embedding model: use Anthropic's `voyage-3` via the voyageai SDK, or fall back to OpenAI `text-embedding-3-small` (1536 dims). Pick one and be consistent. Store the dim in `config.py`.
+Embedding model: local `sentence-transformers` (`all-MiniLM-L6-v2`, 384 dims). Run via `asyncio.to_thread` to avoid blocking the event loop. No API key needed.
 
 ---
 
@@ -425,9 +426,9 @@ Status codes:
 ```
 DATABASE_URL=postgresql+asyncpg://user:pass@localhost:5432/benchmark_db
 BENCHMARK_API_KEY=your-secret-key-here
-ANTHROPIC_API_KEY=sk-ant-...
+OPENROUTER_API_KEY=sk-or-v1-...
 UPLOAD_DIR=./uploads
-EMBEDDING_DIM=1536
+EMBEDDING_DIM=384
 ```
 
 ---
@@ -441,8 +442,8 @@ sqlalchemy[asyncio]
 asyncpg
 alembic
 pgvector
-anthropic
-voyageai         # or openai for embeddings
+openai
+sentence-transformers
 pypdf
 python-multipart
 pydantic-settings
@@ -469,6 +470,6 @@ numpy
 1. **PQ 可用时**：`search()` 用 PQ 近似排序返回候选 chunk_id，再从数据库加载完整记录（过滤 approved），按 PQ 排名返回。
 2. **PQ 未就绪时**（向量数 < 16 时仍在训练前）：回退到 pgvector 精确余弦相似度搜索，行为与原来完全一致。
 
-**PQ 参数：** `dim=1536, M=8, K=16`（benchmark 规模下 16 个向量即可触发训练）
+**PQ 参数：** `dim=384, M=8, K=16`（benchmark 规模下 16 个向量即可触发训练）
 
 **持久化：** 每次 `upsert_chunks` 后自动将索引写入 `pq_index.pkl`，服务重启后自动加载。

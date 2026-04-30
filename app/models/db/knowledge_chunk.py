@@ -11,5 +11,5 @@ class KnowledgeChunk(Base):
     entry_id = Column(Text, ForeignKey("knowledge_entries.id", ondelete="CASCADE"), nullable=False)
     chunk_index = Column(Integer, nullable=False)
     chunk_text = Column(Text, nullable=False)
-    embedding = Column(Vector(1536))
+    embedding = Column(Vector(384))
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))

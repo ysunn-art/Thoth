@@ -3,7 +3,7 @@ from app.repositories.sme_repo import SMERepository
 from app.models.db.interview import Interview
 from app.models.db.turn import Turn
 from app.models.schemas.interview import InterviewCreate, TurnCreate
-from app.services.llm_client import llm_client, UsageInfo
+from app.services.llm_client import llm_client, UsageInfo, MODEL_FAST
 from app.core.ids import new_id
 from app.core.errors import raise_not_found
 
@@ -52,7 +52,7 @@ class InterviewService:
             f"When you have enough information, respond with exactly: {COMPLETE_SIGNAL}"
         )
 
-        response_text, usage = await llm_client.complete(system=system, messages=messages)
+        response_text, usage = await llm_client.complete(system=system, messages=messages, model=MODEL_FAST)
 
         is_complete = COMPLETE_SIGNAL in response_text
         agent_follow_up = None if is_complete else response_text

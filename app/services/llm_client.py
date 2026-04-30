@@ -1,5 +1,6 @@
 from dataclasses import dataclass
-import anthropic
+import asyncio
+from functools import lru_cache
 from openai import AsyncOpenAI
 from app.config import settings
 
@@ -20,38 +21,46 @@ class UsageInfo:
         )
 
 
+MODEL_FAST = "anthropic/claude-haiku-4.5"   # interviews, routing
+MODEL_SMART = "anthropic/claude-sonnet-4.5"  # synthesis, Q&A
+
+
+@lru_cache(maxsize=1)
+def _get_embedding_model():
+    from sentence_transformers import SentenceTransformer
+    return SentenceTransformer("all-MiniLM-L6-v2")
+
+
 class LLMClient:
-    MODEL = "claude-sonnet-4-20250514"
-    EMBED_MODEL = "text-embedding-3-small"
-
     def __init__(self):
-        self._claude = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
-        self._openai = AsyncOpenAI(api_key=settings.openai_api_key) if settings.openai_api_key else None
+        self._client = AsyncOpenAI(
+            base_url="https://openrouter.ai/api/v1",
+            api_key=settings.openrouter_api_key,
+        )
 
-    async def complete(self, system: str, messages: list, max_tokens: int = 2048) -> tuple[str, UsageInfo]:
-        response = await self._claude.messages.create(
-            model=self.MODEL,
+    async def complete(self, system: str, messages: list, max_tokens: int = 2048, model: str = MODEL_SMART) -> tuple[str, UsageInfo]:
+        all_messages = ([{"role": "system", "content": system}] if system else []) + messages
+        response = await self._client.chat.completions.create(
+            model=model,
             max_tokens=max_tokens,
-            system=system,
-            messages=messages,
+            messages=all_messages,
         )
+        u = response.usage
         usage = UsageInfo(
-            prompt_tokens=response.usage.input_tokens,
-            completion_tokens=response.usage.output_tokens,
-            total_tokens=response.usage.input_tokens + response.usage.output_tokens,
-            model=self.MODEL,
+            prompt_tokens=u.prompt_tokens,
+            completion_tokens=u.completion_tokens,
+            total_tokens=u.total_tokens,
+            model=model,
         )
-        return response.content[0].text, usage
+        return response.choices[0].message.content, usage
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
-        if not self._openai:
-            raise RuntimeError("OPENAI_API_KEY not set — required for embeddings")
-        response = await self._openai.embeddings.create(model=self.EMBED_MODEL, input=texts)
-        return [item.embedding for item in response.data]
+        model = _get_embedding_model()
+        embeddings = await asyncio.to_thread(model.encode, texts)
+        return embeddings.tolist()
 
     async def embed_one(self, text: str) -> list[float]:
-        embeddings = await self.embed([text])
-        return embeddings[0]
+        return (await self.embed([text]))[0]
 
 
 llm_client = LLMClient()
