@@ -1,0 +1,375 @@
+{
+  "info": {
+    "name": "Project Thoth — Benchmark API",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "base_url", "value": "http://localhost:8000/api/v1" },
+    { "key": "api_key",  "value": "11d388404161d1805fe13502462668a37be42e48c4a9a4e6004b31b3dd1a60a8" },
+    { "key": "sme_id",       "value": "" },
+    { "key": "interview_id", "value": "" },
+    { "key": "material_id",  "value": "" },
+    { "key": "entry_id",     "value": "" }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [{ "key": "token", "value": "{{api_key}}", "type": "string" }]
+  },
+  "item": [
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "GET /health",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "url": "http://localhost:8000/health"
+          }
+        }
+      ]
+    },
+    {
+      "name": "SMEs",
+      "item": [
+        {
+          "name": "POST /smes — Create SME",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const r = pm.response.json();",
+                  "if (r.id) pm.collectionVariables.set('sme_id', r.id);",
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Has id', () => pm.expect(r.id).to.exist);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/smes",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Dr. Jane Smith\",\n  \"specialization\": \"Network Security\",\n  \"sub_areas\": [\"firewalls\", \"zero trust\", \"VPN\"],\n  \"contact_email\": \"jane@example.com\"\n}"
+            }
+          }
+        },
+        {
+          "name": "GET /smes — List all",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/smes"
+          }
+        },
+        {
+          "name": "GET /smes/:sme_id — Get one",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/smes/{{sme_id}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Interviews",
+      "item": [
+        {
+          "name": "POST /smes/:sme_id/interviews — Create",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const r = pm.response.json();",
+                  "if (r.id) pm.collectionVariables.set('interview_id', r.id);",
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/smes/{{sme_id}}/interviews",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"topic\": \"Zero Trust Network Architecture\"\n}"
+            }
+          }
+        },
+        {
+          "name": "GET /smes/:sme_id/interviews — List",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/smes/{{sme_id}}/interviews"
+          }
+        },
+        {
+          "name": "POST /interviews/:id/turns — Submit turn (calls LLM)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/interviews/{{interview_id}}/turns",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sme_response\": \"Zero trust is a security model based on the principle of never trust, always verify. Every user and device must be authenticated and authorized before accessing any resource, regardless of whether they are inside or outside the network perimeter.\"\n}"
+            }
+          }
+        },
+        {
+          "name": "POST /interviews/:id/turns — 2nd turn",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/interviews/{{interview_id}}/turns",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sme_response\": \"The key components are identity verification, device health checks, least privilege access, microsegmentation of the network, and continuous monitoring of all traffic. We use tools like Okta for identity, CrowdStrike for device health, and Palo Alto for microsegmentation.\"\n}"
+            }
+          }
+        },
+        {
+          "name": "GET /interviews/:id — Full transcript",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/interviews/{{interview_id}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Materials",
+      "item": [
+        {
+          "name": "POST /smes/:sme_id/materials — Upload file",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const r = pm.response.json();",
+                  "if (r.id) pm.collectionVariables.set('material_id', r.id);",
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Status processed', () => pm.expect(r.status).to.equal('processed'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/smes/{{sme_id}}/materials",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "file", "type": "file", "src": [] },
+                { "key": "title", "value": "Zero Trust Whitepaper", "type": "text" },
+                { "key": "description", "value": "Internal document on ZT implementation", "type": "text" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET /smes/:sme_id/materials — List",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/smes/{{sme_id}}/materials"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Knowledge",
+      "item": [
+        {
+          "name": "POST /smes/:sme_id/knowledge/synthesize (calls LLM)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const r = pm.response.json();",
+                  "if (r.id) pm.collectionVariables.set('entry_id', r.id);",
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Status draft', () => pm.expect(r.status).to.equal('draft'));",
+                  "pm.test('Has usage', () => pm.expect(r.usage).to.exist);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/smes/{{sme_id}}/knowledge/synthesize",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"topic\": \"Zero Trust Network Architecture\",\n  \"interview_ids\": [\"{{interview_id}}\"],\n  \"material_ids\": []\n}"
+            }
+          }
+        },
+        {
+          "name": "GET /knowledge — List all",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/knowledge"
+          }
+        },
+        {
+          "name": "GET /knowledge?status=approved — List approved only",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/knowledge?status=approved",
+              "query": [{ "key": "status", "value": "approved" }]
+            }
+          }
+        },
+        {
+          "name": "GET /knowledge/:entry_id — Get one",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/knowledge/{{entry_id}}"
+          }
+        },
+        {
+          "name": "PUT /knowledge/:entry_id — Update content",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/knowledge/{{entry_id}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"content\": \"Updated knowledge entry content about Zero Trust architecture...\"\n}"
+            }
+          }
+        },
+        {
+          "name": "POST /knowledge/:entry_id/approve — draft → sme_approved",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const r = pm.response.json();",
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Status sme_approved', () => pm.expect(r.status).to.equal('sme_approved'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/knowledge/{{entry_id}}/approve"
+          }
+        },
+        {
+          "name": "POST /knowledge/:entry_id/admin-approve — sme_approved → approved (triggers embedding)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const r = pm.response.json();",
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Status approved', () => pm.expect(r.status).to.equal('approved'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/knowledge/{{entry_id}}/admin-approve"
+          }
+        },
+        {
+          "name": "POST /knowledge/:entry_id/reject — any → rejected",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/knowledge/{{entry_id}}/reject",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Content needs more detail on implementation steps\"\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Query",
+      "item": [
+        {
+          "name": "POST /query — Ask a question (calls LLM)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const r = pm.response.json();",
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Has answer', () => pm.expect(r.answer).to.exist);",
+                  "pm.test('Has response_type', () => pm.expect(r.response_type).to.be.oneOf(['answer','clarification','routing']));",
+                  "pm.test('Has usage', () => pm.expect(r.usage).to.exist);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/query",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"question\": \"What is zero trust architecture and how does it work?\",\n  \"session_id\": \"test-session-001\"\n}"
+            }
+          }
+        },
+        {
+          "name": "POST /query — Follow-up (multi-turn)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/query",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"question\": \"What tools did you mention for microsegmentation?\",\n  \"session_id\": \"test-session-001\"\n}"
+            }
+          }
+        },
+        {
+          "name": "POST /query — Out of scope (should route)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/query",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"question\": \"How do I configure a Kubernetes cluster?\",\n  \"session_id\": \"test-session-002\"\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "System",
+      "item": [
+        {
+          "name": "POST /system/reset — Clear sessions only",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/system/reset"
+          }
+        },
+        {
+          "name": "POST /system/purge — Wipe EVERYTHING",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/system/purge"
+          }
+        }
+      ]
+    }
+  ]
+}

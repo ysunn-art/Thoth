@@ -3,9 +3,11 @@
 ## Prerequisites
 
 - Python 3.11+
-- PostgreSQL 15+ with the `pgvector` extension
-- Anthropic API key (for Claude LLM)
-- OpenAI API key (for text embeddings via `text-embedding-3-small`)
+- Docker (for PostgreSQL + pgvector)
+- OpenRouter API key (for LLM via Claude Haiku/Sonnet)
+- No embedding API key needed — embeddings run locally via `sentence-transformers`
+
+---
 
 ## Setup
 
@@ -17,31 +19,32 @@ pip install -r requirements.txt
 
 ### 2. Configure environment
 
-Copy the example and fill in your values:
-
-```bash
-cp .env.example .env
-```
-
-Edit `.env`:
+Create a `.env` file in the project root:
 
 ```
 DATABASE_URL=postgresql+asyncpg://user:pass@localhost:5432/benchmark_db
-BENCHMARK_API_KEY=your-secret-key-here
-ANTHROPIC_API_KEY=sk-ant-...
-OPENAI_API_KEY=sk-...
+BENCHMARK_API_KEY=<your-secret-key>
+OPENROUTER_API_KEY=sk-or-v1-...
 UPLOAD_DIR=./uploads
-EMBEDDING_DIM=1536
+EMBEDDING_DIM=384
 ```
 
-### 3. Set up PostgreSQL with pgvector
+### 3. Start PostgreSQL with pgvector via Docker
 
 ```bash
-# Create the database
-createdb benchmark_db
+docker run -d \
+  --name thoth-db \
+  -e POSTGRES_USER=user \
+  -e POSTGRES_PASSWORD=pass \
+  -e POSTGRES_DB=benchmark_db \
+  -p 5432:5432 \
+  ankane/pgvector
+```
 
-# Enable pgvector (requires pgvector installed on your Postgres instance)
-psql benchmark_db -c "CREATE EXTENSION IF NOT EXISTS vector;"
+If the container already exists but is stopped:
+
+```bash
+docker start thoth-db
 ```
 
 ### 4. Run database migrations
@@ -50,12 +53,7 @@ psql benchmark_db -c "CREATE EXTENSION IF NOT EXISTS vector;"
 alembic upgrade head
 ```
 
-If this is your first run and there are no migration files yet, generate one:
-
-```bash
-alembic revision --autogenerate -m "initial schema"
-alembic upgrade head
-```
+This creates all 6 tables (smes, interviews, turns, materials, knowledge_entries, knowledge_chunks) and the HNSW vector index on `knowledge_chunks.embedding`.
 
 ### 5. Start the server
 
@@ -63,9 +61,42 @@ alembic upgrade head
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-The API is now available at `http://localhost:8000`.
+Verify with:
+
+```bash
+curl http://localhost:8000/health
+# → {"status":"healthy","timestamp":"..."}
+```
 
 Interactive docs: `http://localhost:8000/docs`
+
+---
+
+## Testing with Postman
+
+Import `thoth-postman-collection.json` (included in this repo) into Postman:
+
+**File → Import → select `thoth-postman-collection.json`**
+
+The collection has:
+- `base_url` and `api_key` pre-configured as collection variables
+- Bearer auth applied to all requests automatically
+- Auto-capture scripts that save `sme_id`, `interview_id`, `entry_id` into variables after each create call
+
+**Run in this order:**
+
+```
+Health Check
+→ Create SME
+→ Create Interview
+→ Submit Turn(s)
+→ Upload Material (optional)
+→ Synthesize Knowledge Entry
+→ Approve (draft → sme_approved)
+→ Admin Approve (sme_approved → approved, triggers embedding)
+→ Query
+→ System Purge / Reset
+```
 
 ---
 
@@ -77,7 +108,7 @@ All endpoints are under `/api/v1`:
 http://localhost:8000/api/v1
 ```
 
-Health check (no auth):
+Health check (no auth required):
 
 ```
 http://localhost:8000/health
@@ -99,58 +130,72 @@ Authorization: Bearer <BENCHMARK_API_KEY>
 
 ```bash
 export BASE="http://localhost:8000/api/v1"
-export KEY="your-secret-key-here"
+export KEY="<your-benchmark-api-key>"
 
-# Health check
+# Health check (no auth)
 curl http://localhost:8000/health
 
 # Create an SME
-curl -X POST $BASE/smes \
+curl -s -X POST $BASE/smes \
   -H "Authorization: Bearer $KEY" \
   -H "Content-Type: application/json" \
-  -d '{"name":"Dr. Smith","specialization":"AI Safety","sub_areas":["alignment","robustness"],"contact_email":"smith@example.com"}'
+  -d '{"name":"Dr. Jane Smith","specialization":"Network Security","sub_areas":["firewalls","zero trust","VPN"],"contact_email":"jane@example.com"}'
 
-# Start an interview
-curl -X POST $BASE/smes/<sme_id>/interviews \
+# Start an interview (replace <sme_id>)
+curl -s -X POST $BASE/smes/<sme_id>/interviews \
   -H "Authorization: Bearer $KEY" \
   -H "Content-Type: application/json" \
-  -d '{"topic":"AI alignment techniques"}'
+  -d '{"topic":"Zero Trust Architecture"}'
 
-# Submit a turn
-curl -X POST $BASE/interviews/<interview_id>/turns \
+# Submit a turn (replace <interview_id>)
+curl -s -X POST $BASE/interviews/<interview_id>/turns \
   -H "Authorization: Bearer $KEY" \
   -H "Content-Type: application/json" \
-  -d '{"sme_response":"RLHF is the primary technique we use..."}'
+  -d '{"sme_response":"Zero trust means never trust, always verify every user and device..."}'
 
 # Upload a material
-curl -X POST $BASE/smes/<sme_id>/materials \
+curl -s -X POST $BASE/smes/<sme_id>/materials \
   -H "Authorization: Bearer $KEY" \
   -F "file=@/path/to/doc.pdf" \
-  -F "title=Safety Guidelines" \
-  -F "description=Internal safety document"
+  -F "title=Zero Trust Whitepaper" \
+  -F "description=Internal ZT implementation guide"
 
-# Synthesize knowledge
-curl -X POST $BASE/smes/<sme_id>/knowledge/synthesize \
+# Synthesize knowledge entry
+curl -s -X POST $BASE/smes/<sme_id>/knowledge/synthesize \
   -H "Authorization: Bearer $KEY" \
   -H "Content-Type: application/json" \
-  -d '{"interview_ids":["<interview_id>"],"material_ids":[],"topic":"AI alignment"}'
+  -d '{"interview_ids":["<interview_id>"],"material_ids":[],"topic":"Zero Trust Architecture"}'
 
-# Approve → SME approve → Admin approve
-curl -X POST $BASE/knowledge/<entry_id>/approve -H "Authorization: Bearer $KEY"
-curl -X POST $BASE/knowledge/<entry_id>/admin-approve -H "Authorization: Bearer $KEY"
+# Approve workflow (replace <entry_id>)
+curl -s -X POST $BASE/knowledge/<entry_id>/approve -H "Authorization: Bearer $KEY"
+curl -s -X POST $BASE/knowledge/<entry_id>/admin-approve -H "Authorization: Bearer $KEY"
 
-# Query
-curl -X POST $BASE/query \
+# Query the knowledge base
+curl -s -X POST $BASE/query \
   -H "Authorization: Bearer $KEY" \
   -H "Content-Type: application/json" \
-  -d '{"question":"What is RLHF?","session_id":"session-1"}'
+  -d '{"question":"What is zero trust architecture?","session_id":"session-1"}'
 
-# Purge all data
-curl -X POST $BASE/system/purge -H "Authorization: Bearer $KEY"
-
-# Reset sessions only
-curl -X POST $BASE/system/reset -H "Authorization: Bearer $KEY"
+# System operations
+curl -s -X POST $BASE/system/reset -H "Authorization: Bearer $KEY"   # clear sessions only
+curl -s -X POST $BASE/system/purge -H "Authorization: Bearer $KEY"   # wipe everything
 ```
+
+---
+
+## Stack
+
+| Component | Technology |
+|---|---|
+| Web framework | FastAPI + Uvicorn |
+| Database | PostgreSQL (Docker: `ankane/pgvector`) |
+| Vector search | pgvector with HNSW index, 384-dim |
+| Vector index (approx) | In-memory PQ index (`pq/` module) |
+| LLM — fast | OpenRouter → `anthropic/claude-haiku-4.5` |
+| LLM — smart | OpenRouter → `anthropic/claude-sonnet-4.5` |
+| Embeddings | Local `sentence-transformers` `all-MiniLM-L6-v2` (384-dim, free) |
+| ORM | SQLAlchemy async + Alembic |
+| File parsing | pypdf (PDF), plain read (txt/md) |
 
 ---
 
@@ -162,18 +207,20 @@ app/
 ├── config.py             # Settings from .env
 ├── dependencies.py       # Shared FastAPI dependencies
 ├── routers/              # HTTP route handlers
-├── services/             # Business logic
-├── repositories/         # Database access
+├── services/             # Business logic + LLM client
+├── repositories/         # Database access layer
 ├── models/
 │   ├── db/               # SQLAlchemy ORM models
 │   └── schemas/          # Pydantic request/response schemas
 ├── core/
 │   ├── auth.py           # API key verification
 │   ├── errors.py         # HTTP error helpers + state guards
-│   └── ids.py            # ID generation
+│   └── ids.py            # ID generation (prefix_hex8)
 └── db/
     ├── session.py        # Async SQLAlchemy engine + session
-    └── migrations/       # Alembic migrations
+    └── migrations/       # Alembic migration files
+pq/                       # Product Quantization vector index module
 storage/
 └── file_store.py         # Local file save/read/purge
+thoth-postman-collection.json  # Postman collection for all endpoints
 ```
