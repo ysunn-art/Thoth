@@ -2,9 +2,7 @@ import io
 from fastapi import HTTPException, UploadFile
 from app.repositories.material_repo import MaterialRepository
 from app.repositories.sme_repo import SMERepository
-from app.repositories.vector_repo import VectorRepository
 from app.models.db.material import Material
-from app.services.llm_client import llm_client
 from app.core.ids import new_id
 from app.core.errors import raise_not_found
 from storage.file_store import save_file, read_file
@@ -34,10 +32,9 @@ def _parse_file(content: bytes, file_type: str) -> str:
 
 
 class MaterialService:
-    def __init__(self, repo: MaterialRepository, sme_repo: SMERepository, vector_repo: VectorRepository):
+    def __init__(self, repo: MaterialRepository, sme_repo: SMERepository):
         self.repo = repo
         self.sme_repo = sme_repo
-        self.vector_repo = vector_repo
 
     async def upload_material(self, sme_id: str, file: UploadFile, title: str, description: str | None) -> tuple[Material, dict | None]:
         sme = await self.sme_repo.get_by_id(sme_id)
@@ -66,10 +63,11 @@ class MaterialService:
         )
         material = await self.repo.create(material)
 
-        text = _parse_file(content, content_type)
-        chunks = _chunk_text(text)
-        embeddings = await llm_client.embed(chunks)
-        await self.vector_repo.upsert_chunks(material_id, [(i, c, e) for i, (c, e) in enumerate(zip(chunks, embeddings))])
+        # Parse the file to validate it's readable — text is stored on disk
+        # and read during synthesis. Embedding happens at admin-approve time
+        # on the resulting knowledge entry (knowledge_chunks requires a
+        # knowledge_entries FK, not a material FK).
+        _parse_file(content, content_type)
 
         material.status = "processed"
         material = await self.repo.update(material)

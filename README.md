@@ -1,3 +1,31 @@
+# Project Thoth
+
+## Implementation
+
+A FastAPI backend implementing all 8 benchmark capabilities for the T-Mobile Project Thoth hackathon.
+
+**Stack:** FastAPI · PostgreSQL + pgvector (Docker) · OpenRouter (Claude Haiku 4.5 / Sonnet 4.5) · sentence-transformers (local, 384-dim) · PQ vector index
+
+**Quick start:**
+```bash
+# 1. Start database
+docker start thoth-db   # or: docker run -d --name thoth-db -e POSTGRES_USER=user -e POSTGRES_PASSWORD=pass -e POSTGRES_DB=benchmark_db -p 5432:5432 ankane/pgvector
+
+# 2. Run migrations
+alembic upgrade head
+
+# 3. Start server
+uvicorn app.main:app --reload --port 8000
+```
+
+See [usage.md](usage.md) for full setup, endpoint reference, and Postman collection.
+See [progress.md](progress.md) for implementation status and bug fixes.
+
+Base URL: `http://localhost:8000/api/v1`
+Auth: `Authorization: Bearer <BENCHMARK_API_KEY>`
+
+---
+
 # Project Thoth Brief
 
 ---

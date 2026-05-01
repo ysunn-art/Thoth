@@ -10,8 +10,18 @@ from app.services.llm_client import llm_client, UsageInfo
 from app.core.ids import new_id
 from app.core.errors import raise_not_found, guard_transition, guard_not_rejected
 from storage.file_store import read_file
+import io
 
 CHUNK_SIZE = 2000
+
+
+def _parse_file(content: bytes, file_type: str) -> str:
+    """Extract plain text from file bytes, handling PDF vs plain text."""
+    if file_type == "application/pdf":
+        from pypdf import PdfReader
+        reader = PdfReader(io.BytesIO(content))
+        return "\n".join(page.extract_text() or "" for page in reader.pages)
+    return content.decode("utf-8", errors="replace")
 CHUNK_OVERLAP = 200
 
 
@@ -64,8 +74,9 @@ class KnowledgeService:
             if not material:
                 raise_not_found("Material", mat_id)
             try:
-                content = read_file(material.file_path)
-                materials_text.append(f"[{material.title}]\n{content.decode('utf-8', errors='replace')}")
+                raw = read_file(material.file_path)
+                text = _parse_file(raw, material.file_type)
+                materials_text.append(f"[{material.title}]\n{text}")
             except Exception:
                 materials_text.append(f"[{material.title}] (content unavailable)")
 

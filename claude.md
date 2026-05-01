@@ -454,22 +454,28 @@ numpy
 
 ## Progress
 
-### 2026-04-28 — PQ 向量索引集成
+### 2026-04-30 — Bug fixes, end-to-end verified ✅
 
-在 bonus-thoth-farmers 中集成了 Product Quantization 近似搜索层，作为 pgvector 精确搜索的加速 sidecar。
+Full pipeline tested with Postman. RAG working (`grounded: true`, answers from PDF content).
 
-**新增文件：**
-- `pq/` — 从 pqvector 项目迁移的完整 PQ 模块（kmeans / codebook / encoder / index）
-- `app/services/pq_index_service.py` — 管理 PQ 索引生命周期的单例服务
+**Bug fix — `material_service.py`:**
+- Removed `vector_repo.upsert_chunks(material_id, ...)` call — `knowledge_chunks.entry_id` is a FK to `knowledge_entries`, passing `mat_...` caused FK violation → 500.
+- Materials now store to disk only; text extracted during synthesis.
 
-**修改文件：**
-- `app/repositories/vector_repo.py` — 集成 PQ 到 upsert / search / delete
-- `requirements.txt` — 新增 numpy
+**Bug fix — `knowledge_service.py`:**
+- `synthesize` was calling `content.decode('utf-8')` on raw PDF bytes → binary garbage sent to LLM → hallucinated content unrelated to document.
+- Added `_parse_file(content, file_type)` using pypdf to correctly extract PDF text before synthesis.
 
-**搜索策略（双轨制）：**
-1. **PQ 可用时**：`search()` 用 PQ 近似排序返回候选 chunk_id，再从数据库加载完整记录（过滤 approved），按 PQ 排名返回。
-2. **PQ 未就绪时**（向量数 < 16 时仍在训练前）：回退到 pgvector 精确余弦相似度搜索，行为与原来完全一致。
+### 2026-04-28 — PQ vector index + architecture migration
 
-**PQ 参数：** `dim=384, M=8, K=16`（benchmark 规模下 16 个向量即可触发训练）
+**Architecture migration** (Anthropic SDK + OpenAI embeddings → OpenRouter + sentence-transformers):
+- `llm_client.py` — openai SDK → OpenRouter, Haiku 4.5 (fast) + Sonnet 4.5 (smart), local sentence-transformers embeddings
+- `config.py` — `OPENROUTER_API_KEY`, `embedding_dim=384`
+- `knowledge_chunk.py` — `vector(384)`
+- DB migration — HNSW index
 
-**持久化：** 每次 `upsert_chunks` 后自动将索引写入 `pq_index.pkl`，服务重启后自动加载。
+**PQ sidecar integration:**
+- `pq/` — numpy-only PQ module (kmeans / codebook / encoder / index)
+- `app/services/pq_index_service.py` — singleton, trains at 16+ chunks, persists to `pq_index.pkl`
+- `vector_repo.py` — dual-track: PQ approximate search → pgvector exact fallback
+- PQ params: `dim=384, M=8, K=16`
