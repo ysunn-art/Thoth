@@ -29,10 +29,11 @@ async def test_upsert_chunks_empty_list_commits_without_insert():
     db = AsyncMock()
     repo = VectorRepository(db)
 
-    with patch("app.repositories.vector_repo.pq_index_service"):
+    with patch("app.repositories.vector_repo.pq_index_service") as mock_pq:
         await repo.upsert_chunks("ke_test", [])
 
     db.add.assert_not_called()
     # Only the delete execute, no insert
     assert db.execute.call_count == 1
     db.commit.assert_called_once()
+    mock_pq.save.assert_called_once()
