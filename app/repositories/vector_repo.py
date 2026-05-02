@@ -1,5 +1,6 @@
+from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, delete, text
+from sqlalchemy import select, delete, insert, text
 from app.models.db.knowledge_chunk import KnowledgeChunk
 from app.models.db.knowledge_entry import KnowledgeEntry
 from app.core.ids import new_id
@@ -14,17 +15,25 @@ class VectorRepository:
         await self.db.execute(delete(KnowledgeChunk).where(KnowledgeChunk.entry_id == entry_id))
         pq_index_service.remove_entry(entry_id)  # clear stale codes before re-adding
 
-        for chunk_index, chunk_text, embedding in chunks:
-            chunk = KnowledgeChunk(
-                id=new_id("chunk"),
-                entry_id=entry_id,
-                chunk_index=chunk_index,
-                chunk_text=chunk_text,
-                embedding=embedding,
-            )
-            self.db.add(chunk)
-            pq_index_service.add(chunk.id, entry_id, embedding)
+        if not chunks:
+            await self.db.commit()
+            pq_index_service.save()
+            return
 
+        rows = []
+        for chunk_index, chunk_text, embedding in chunks:
+            chunk_id = new_id("chunk")
+            rows.append({
+                "id": chunk_id,
+                "entry_id": entry_id,
+                "chunk_index": chunk_index,
+                "chunk_text": chunk_text,
+                "embedding": embedding,
+                "created_at": datetime.now(timezone.utc),
+            })
+            pq_index_service.add(chunk_id, entry_id, embedding)
+
+        await self.db.execute(insert(KnowledgeChunk), rows)
         await self.db.commit()
         pq_index_service.save()
 
