@@ -21,6 +21,16 @@ uvicorn app.main:app --reload --port 8000
 See [usage.md](usage.md) for full setup, endpoint reference, and Postman collection.
 See [progress.md](progress.md) for implementation status and bug fixes.
 
+---
+
+## Changelog
+
+### 2026-05-02 — Performance improvements
+
+- **Parallel material loading** (`knowledge_service.py`): `synthesize()` now loads all material files concurrently via `asyncio.gather` + `asyncio.to_thread` instead of sequentially. DB reads remain sequential (SQLAlchemy `AsyncSession` constraint). Load failures log a warning and degrade gracefully rather than crashing.
+- **SME list cache** (`sme_repo.py`): `list_all()` caches results in a module-level variable, eliminating a full table scan on every `/query` request. Cache is invalidated on SME create and system purge.
+- **Bulk chunk insert** (`vector_repo.py`): `upsert_chunks()` now issues a single `execute(insert(...), rows)` instead of one `db.add()` per chunk — one DB round-trip regardless of chunk count.
+
 Base URL: `http://localhost:8000/api/v1`
 Auth: `Authorization: Bearer <BENCHMARK_API_KEY>`
 
