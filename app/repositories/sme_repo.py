@@ -2,6 +2,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
 from app.models.db.sme import SME
 
+# Safe to cache ORM objects: SME has no relationships, so detached objects remain fully readable.
 _sme_cache: list | None = None
 
 
