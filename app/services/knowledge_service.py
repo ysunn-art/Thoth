@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from datetime import datetime, timezone
 from app.repositories.knowledge_repo import KnowledgeRepository
 from app.repositories.interview_repo import InterviewRepository
@@ -12,6 +13,8 @@ from app.core.ids import new_id
 from app.core.errors import raise_not_found, guard_transition, guard_not_rejected
 from storage.file_store import read_file
 import io
+
+logger = logging.getLogger(__name__)
 
 CHUNK_SIZE = 2000
 CHUNK_OVERLAP = 200
@@ -85,7 +88,8 @@ class KnowledgeService:
                 raw = await asyncio.to_thread(read_file, material.file_path)
                 text = await asyncio.to_thread(_parse_file, raw, material.file_type)
                 return f"[{material.title}]\n{text}"
-            except Exception:
+            except Exception as exc:
+                logger.warning("Failed to load material %s: %s", material.id, exc)
                 return f"[{material.title}] (content unavailable)"
 
         materials_text = list(await asyncio.gather(*[_load_material(m) for m in material_records]))
