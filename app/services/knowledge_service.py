@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime, timezone
 from app.repositories.knowledge_repo import KnowledgeRepository
 from app.repositories.interview_repo import InterviewRepository
@@ -13,16 +14,15 @@ from storage.file_store import read_file
 import io
 
 CHUNK_SIZE = 2000
+CHUNK_OVERLAP = 200
 
 
 def _parse_file(content: bytes, file_type: str) -> str:
-    """Extract plain text from file bytes, handling PDF vs plain text."""
     if file_type == "application/pdf":
         from pypdf import PdfReader
         reader = PdfReader(io.BytesIO(content))
         return "\n".join(page.extract_text() or "" for page in reader.pages)
     return content.decode("utf-8", errors="replace")
-CHUNK_OVERLAP = 200
 
 
 def _chunk_text(text: str) -> list[str]:
@@ -55,12 +55,24 @@ class KnowledgeService:
         if not sme:
             raise_not_found("SME", sme_id)
 
-        transcripts = []
+        # Sequential DB reads — AsyncSession is not safe for concurrent use
+        interview_records: list[tuple] = []
         for int_id in data.interview_ids:
             interview = await self.interview_repo.get_by_id(int_id)
             if not interview:
                 raise_not_found("Interview", int_id)
             turns = await self.interview_repo.get_turns(int_id)
+            interview_records.append((interview, turns))
+
+        material_records = []
+        for mat_id in data.material_ids:
+            material = await self.material_repo.get_by_id(mat_id)
+            if not material:
+                raise_not_found("Material", mat_id)
+            material_records.append(material)
+
+        transcripts = []
+        for interview, turns in interview_records:
             transcript = f"Interview on {interview.topic}:\n"
             for t in turns:
                 transcript += f"  SME: {t.sme_response}\n"
@@ -68,17 +80,15 @@ class KnowledgeService:
                     transcript += f"  Agent: {t.agent_follow_up}\n"
             transcripts.append(transcript)
 
-        materials_text = []
-        for mat_id in data.material_ids:
-            material = await self.material_repo.get_by_id(mat_id)
-            if not material:
-                raise_not_found("Material", mat_id)
+        async def _load_material(material) -> str:
             try:
-                raw = read_file(material.file_path)
-                text = _parse_file(raw, material.file_type)
-                materials_text.append(f"[{material.title}]\n{text}")
+                raw = await asyncio.to_thread(read_file, material.file_path)
+                text = await asyncio.to_thread(_parse_file, raw, material.file_type)
+                return f"[{material.title}]\n{text}"
             except Exception:
-                materials_text.append(f"[{material.title}] (content unavailable)")
+                return f"[{material.title}] (content unavailable)"
+
+        materials_text = list(await asyncio.gather(*[_load_material(m) for m in material_records]))
 
         user_msg = (
             f"Synthesize the following interview transcripts and reference materials into a "
@@ -88,7 +98,11 @@ class KnowledgeService:
         )
 
         system = "You are synthesizing expert knowledge into a clear, structured knowledge base entry."
-        content, usage = await llm_client.complete(system=system, messages=[{"role": "user", "content": user_msg}], max_tokens=4096)
+        content, usage = await llm_client.complete(
+            system=system,
+            messages=[{"role": "user", "content": user_msg}],
+            max_tokens=4096,
+        )
 
         entry = KnowledgeEntry(
             id=new_id("ke"),
@@ -131,8 +145,10 @@ class KnowledgeService:
 
         chunks = _chunk_text(entry.content)
         embeddings = await llm_client.embed(chunks)
-        await self.vector_repo.upsert_chunks(entry_id, [(i, c, e) for i, (c, e) in enumerate(zip(chunks, embeddings))])
-
+        await self.vector_repo.upsert_chunks(
+            entry_id,
+            [(i, c, e) for i, (c, e) in enumerate(zip(chunks, embeddings))],
+        )
         return entry
 
     async def reject(self, entry_id: str, data: RejectRequest) -> KnowledgeEntry:
