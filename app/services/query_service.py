@@ -40,7 +40,7 @@ class QueryService:
             "If the question is too vague, ask for clarification. "
             "If no relevant knowledge exists, route to the appropriate SME. "
             'Respond in JSON only: { "response_type": "answer"|"clarification"|"routing", '
-            '"answer": string, "grounded": boolean, '
+            '"answer": string (REQUIRED — never null; for routing explain why you are routing), "grounded": boolean, '
             '"sources": [{"entry_id": string, "sme_name": string, "topic": string}], '
             '"routed_to": [{"type": "sme"|"admin", "sme_name": string|null, "specialization": string, "reason": string}]|null, '
             '"disclaimer": string|null }'
@@ -62,15 +62,17 @@ class QueryService:
             end = response_text.rfind("}") + 1
             parsed = json.loads(response_text[start:end]) if start != -1 else {}
 
+        answer = parsed.get("answer") or response_text
+
         session_store.append(session_id, "user", question)
-        session_store.append(session_id, "assistant", parsed.get("answer", response_text))
+        session_store.append(session_id, "assistant", answer)
 
         sources = [SourceRef(**s) for s in (parsed.get("sources") or [])]
         routed_to_raw = parsed.get("routed_to")
         routed_to = [RoutingTarget(**r) for r in routed_to_raw] if routed_to_raw else None
 
         return QueryResponse(
-            answer=parsed.get("answer", response_text),
+            answer=answer,
             grounded=parsed.get("grounded", False),
             sources=sources,
             disclaimer=parsed.get("disclaimer"),
