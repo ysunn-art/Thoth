@@ -133,84 +133,172 @@ class QueryService:
             usage=usage_schema,
         )
 
-    def _is_vague_question(self, question: str) -> bool:
-        """
-        Heuristic: a question is 'vague' if it has very few content words
-        or contains no domain-specific terms. Used only when retrieval
-        returns nothing — we want to clarify rather than escalate.
-        """
-        q = question.strip().lower().rstrip("?.!")
-        words = [w for w in q.split() if len(w) > 2]
-
-        if len(words) <= 5:
-            return True
-
-        vague_starters = (
-            "what are the", "what is the", "how does it", "tell me about",
-            "what about", "anything about", "info on", "details on"
-        )
-        if any(q.startswith(s) for s in vague_starters) and len(words) <= 7:
-            return True
-
-        return False
-
-    async def _ask_clarification(
+    async def _ask_or_route(
         self, question: str, session_id: str, smes: list
     ) -> QueryResponse:
+        """
+        No relevant knowledge was retrieved. Use the LLM to decide:
+        - CLARIFY if the question is under-specified but could plausibly
+          fit one or more of the available SME domains
+        - ROUTE if the question is clear but clearly outside all SME
+          domains (fall through to _route_or_escalate)
+        """
         domains = "\n".join(f"- {s.specialization}" for s in smes)
 
         system = (
-            "You are a knowledge base assistant. The user's question is "
-            "too vague to answer or route confidently. Generate ONE short "
-            "clarifying question that asks them which area they're interested in. "
-            "Do NOT answer the original question. Do NOT list all domains in the "
-            "clarifying question — keep it conversational. "
-            'Respond in JSON only: {"clarifying_question": string}'
+            "You are a strict routing classifier. Your only job is to choose "
+            "between ROUTE and CLARIFY. You are NOT a helpful assistant — do "
+            "not try to be friendly or offer the user multiple choices. Choose "
+            "exactly one action and output JSON.\n\n"
+
+            "OUTPUT FORMAT (no other text, no markdown, no preamble):\n"
+            '{"decision": "route" | "clarify", "clarifying_question": string | null}\n\n'
+
+            "DECISION RULES:\n\n"
+
+            "Choose ROUTE when the question's topic is not part of the listed "
+            "SME domains. This includes:\n"
+            "- General knowledge (physics, chemistry, biology, weather, math, "
+            "geography, history, current events, sports, entertainment, food, "
+            "travel, programming, medicine, etc.)\n"
+            "- Questions about other industries, products, companies, or domains "
+            "not in the list\n"
+            "- Personal questions, opinion questions, small talk\n"
+            "- Questions that vaguely sound like they might relate to a domain "
+            "but actually do not.\n"
+            "When in doubt about whether the topic is in scope: ROUTE.\n\n"
+
+            "Choose CLARIFY only when ALL of the following are true:\n"
+            "- The question uses generic terms (requirements, rules, forms, "
+            "process, procedures, steps, deadlines, fees) WITHOUT naming the "
+            "specific domain.\n"
+            "- The question could plausibly be answered by at least TWO of the "
+            "listed domains.\n"
+            "- The topic itself is clearly within the listed domains, only the "
+            "specific sub-area is unclear.\n"
+            "If any one of these is false: ROUTE.\n\n"
+
+            "FORBIDDEN BEHAVIOR:\n"
+            "- Do not output a clarifying_question that asks 'is this about X "
+            "or something else?' — that pattern means you should ROUTE, not "
+            "clarify.\n"
+            "- Do not offer the user a chance to rephrase off-topic questions.\n"
+            "- Do not say 'I notice your question is about X but my knowledge "
+            "is about Y' — that is a ROUTE case, not a CLARIFY case.\n"
+            "- If you find yourself wanting to mention the user's topic and the "
+            "knowledge domains in the same clarifying question, stop and "
+            "choose ROUTE instead.\n\n"
+
+            "EXAMPLES (the domains shown are illustrative; apply the same "
+            "reasoning to whichever domains appear in the actual input):\n\n"
+
+            "Input:\n"
+            "User question: How do birds fly?\n"
+            "Available domains:\n"
+            "- Software Engineering Best Practices\n"
+            "- Database Administration\n"
+            "- Network Security\n"
+            "Output:\n"
+            '{"decision": "route", "clarifying_question": null}\n\n'
+
+            "Input:\n"
+            "User question: What is the capital of France?\n"
+            "Available domains:\n"
+            "- Pharmaceutical Regulatory Affairs\n"
+            "- Clinical Trial Design\n"
+            "Output:\n"
+            '{"decision": "route", "clarifying_question": null}\n\n'
+
+            "Input:\n"
+            "User question: What is the latest version of Python?\n"
+            "Available domains:\n"
+            "- Tax Law\n"
+            "- Estate Planning\n"
+            "- Immigration Law\n"
+            "Output:\n"
+            '{"decision": "route", "clarifying_question": null}\n\n'
+
+            "Input:\n"
+            "User question: What are the requirements?\n"
+            "Available domains:\n"
+            "- Software Engineering Best Practices\n"
+            "- Database Administration\n"
+            "- Network Security\n"
+            "Output:\n"
+            '{"decision": "clarify", "clarifying_question": "Which area are '
+            'you asking about — software engineering, database administration, '
+            'or network security?"}\n\n'
+
+            "Input:\n"
+            "User question: Tell me about the process\n"
+            "Available domains:\n"
+            "- Tax Law\n"
+            "- Estate Planning\n"
+            "- Immigration Law\n"
+            "Output:\n"
+            '{"decision": "clarify", "clarifying_question": "Which process — '
+            'tax filing, estate planning, or immigration?"}\n\n'
+
+            "Input:\n"
+            "User question: How do I learn JavaScript and also what are tax rules?\n"
+            "Available domains:\n"
+            "- Tax Law\n"
+            "- Estate Planning\n"
+            "Output:\n"
+            '{"decision": "route", "clarifying_question": null}\n\n'
+
+            "Note: in the CLARIFY examples, notice that the clarifying_question "
+            "lists the actual domain names from the available domains list. "
+            "When you produce a real clarifying question, do the same — use the "
+            "actual domain names provided in the input, not the example names.\n\n"
+
+            "Now classify the user's question. Output JSON only."
         )
         user_msg = (
-            f"User asked: {question}\n"
-            f"Available knowledge domains:\n{domains}"
+            f"User question: {question}\n\n"
+            f"Available SME specialization domains:\n{domains}"
         )
 
-        usage_schema = UsageSchema(prompt_tokens=0, completion_tokens=0, total_tokens=0, model="none")
-        clarifying_question = "Could you provide more details?"
+        response_text, usage = await llm_client.complete(
+            system=system,
+            messages=[{"role": "user", "content": user_msg}],
+        )
 
         try:
-            response_text, usage = await llm_client.complete(
-                system=system,
-                messages=[{"role": "user", "content": user_msg}],
-                max_tokens=256,
-            )
-            usage_schema = UsageSchema(
-                prompt_tokens=usage.prompt_tokens,
-                completion_tokens=usage.completion_tokens,
-                total_tokens=usage.total_tokens,
-                model=usage.model,
-            )
-            try:
-                parsed = json.loads(response_text)
-            except json.JSONDecodeError:
-                start = response_text.find("{")
-                end = response_text.rfind("}") + 1
-                parsed = json.loads(response_text[start:end]) if start != -1 else {}
-            clarifying_question = parsed.get("clarifying_question") or clarifying_question
-        except Exception:
-            pass
+            parsed = json.loads(response_text)
+        except json.JSONDecodeError:
+            start = response_text.find("{")
+            end = response_text.rfind("}") + 1
+            parsed = json.loads(response_text[start:end]) if start != -1 else {}
 
-        session_store.append(session_id, "user", question)
-        session_store.append(session_id, "assistant", clarifying_question)
+        decision = parsed.get("decision", "route")
+        clarifying_q = parsed.get("clarifying_question")
 
-        return QueryResponse(
-            answer=clarifying_question,
-            grounded=False,
-            sources=[],
-            disclaimer=None,
-            session_id=session_id,
-            response_type="clarification",
-            routed_to=None,
-            timestamp=datetime.now(timezone.utc).isoformat(),
-            usage=usage_schema,
-        )
+        if decision == "clarify" and clarifying_q:
+            session_store.append(session_id, "user", question)
+            session_store.append(session_id, "assistant", clarifying_q)
+            return QueryResponse(
+                answer=clarifying_q,
+                grounded=False,
+                sources=[],
+                disclaimer=None,
+                session_id=session_id,
+                response_type="clarification",
+                routed_to=None,
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                usage=UsageSchema(
+                    prompt_tokens=usage.prompt_tokens,
+                    completion_tokens=usage.completion_tokens,
+                    total_tokens=usage.total_tokens,
+                    model=usage.model,
+                ),
+            )
+
+        # decision == "route" — fall through to existing routing path.
+        # Note: this triggers a second LLM call inside _route_or_escalate
+        # to match the question to an SME. The total token cost (~400-600
+        # for two short prompts) is acceptable for correct semantic routing.
+        return await self._route_or_escalate(question, session_id)
 
     async def query(self, question: str, session_id: str) -> QueryResponse:
         query_embedding = await llm_client.embed_one(question)
@@ -219,8 +307,8 @@ class QueryService:
         if not chunks:
             # list_all is cached — cheap call
             smes = await self.sme_repo.list_all()
-            if smes and self._is_vague_question(question):
-                return await self._ask_clarification(question, session_id, smes)
+            if smes:
+                return await self._ask_or_route(question, session_id, smes)
             return await self._route_or_escalate(question, session_id)
 
         RELEVANCE_THRESHOLD = 0.45
@@ -229,8 +317,8 @@ class QueryService:
         if not relevant_chunks:
             # list_all is cached — _route_or_escalate also fetches internally, acceptable duplication
             smes = await self.sme_repo.list_all()
-            if smes and self._is_vague_question(question):
-                return await self._ask_clarification(question, session_id, smes)
+            if smes:
+                return await self._ask_or_route(question, session_id, smes)
             return await self._route_or_escalate(question, session_id)
 
         smes = await self.sme_repo.list_all()
