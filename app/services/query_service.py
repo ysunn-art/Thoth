@@ -135,7 +135,7 @@ class QueryService:
 
     async def query(self, question: str, session_id: str) -> QueryResponse:
         query_embedding = await llm_client.embed_one(question)
-        chunks = await self.vector_repo.search(query_embedding, top_k=3)
+        chunks = await self.vector_repo.search(query_embedding, top_k=5)
 
         if not chunks:
             return await self._route_or_escalate(question, session_id)
@@ -171,6 +171,10 @@ class QueryService:
         system = (
             "You are a knowledge base assistant. Answer questions using ONLY the provided knowledge entries. "
             "If the question is too vague, ask for clarification. "
+            "If the retrieved knowledge entries come from two or more different SMEs "
+            "(different sme_name across sources) and the question genuinely spans both "
+            "specializations, set response_type='routing' and list ALL relevant SMEs in "
+            "routed_to, rather than answering with knowledge from only one. "
             "Each entry has a Relevance score (0-1). If the top entry's Relevance is "
             "below 0.65, prefer clarification or routing over answering directly. "
             "If the answer is not in the knowledge entries, route to ALL appropriate SMEs — "
