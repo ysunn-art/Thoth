@@ -16,11 +16,65 @@ class QueryService:
 
     async def query(self, question: str, session_id: str) -> QueryResponse:
         query_embedding = await llm_client.embed_one(question)
-        chunks = await self.vector_repo.search(query_embedding, top_k=5)
+        chunks = await self.vector_repo.search(query_embedding, top_k=3)
+
+        if not chunks:
+            session_store.append(session_id, "user", question)
+            refusal = (
+                "I don't have any approved knowledge to answer this question. "
+                "Please consult an administrator."
+            )
+            session_store.append(session_id, "assistant", refusal)
+            return QueryResponse(
+                answer=refusal,
+                grounded=False,
+                sources=[],
+                disclaimer=None,
+                session_id=session_id,
+                response_type="routing",
+                routed_to=[RoutingTarget(
+                    type="admin",
+                    sme_name=None,
+                    specialization="N/A",
+                    reason="Knowledge base is empty or no relevant content exists.",
+                )],
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                usage=UsageSchema(prompt_tokens=0, completion_tokens=0, total_tokens=0, model="none"),
+            )
+
+        RELEVANCE_THRESHOLD = 0.45
+        relevant_chunks = [(c, e, s) for c, e, s in chunks if s >= RELEVANCE_THRESHOLD]
+
+        if not relevant_chunks:
+            session_store.append(session_id, "user", question)
+            refusal = (
+                "I don't have any approved knowledge to answer this question. "
+                "Please consult an administrator."
+            )
+            session_store.append(session_id, "assistant", refusal)
+            return QueryResponse(
+                answer=refusal,
+                grounded=False,
+                sources=[],
+                disclaimer=None,
+                session_id=session_id,
+                response_type="routing",
+                routed_to=[RoutingTarget(
+                    type="admin",
+                    sme_name=None,
+                    specialization="N/A",
+                    reason="Knowledge base is empty or no relevant content exists.",
+                )],
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                usage=UsageSchema(prompt_tokens=0, completion_tokens=0, total_tokens=0, model="none"),
+            )
 
         knowledge_context = ""
-        for chunk, entry in chunks:
-            knowledge_context += f"[Entry {entry.id} | Topic: {entry.topic}]\n{chunk.chunk_text}\n\n"
+        for chunk, entry, sim in relevant_chunks:
+            knowledge_context += (
+                f"[Entry {entry.id} | Topic: {entry.topic} | Relevance: {sim:.2f}]\n"
+                f"{chunk.chunk_text}\n\n"
+            )
 
         smes = await self.sme_repo.list_all()
         sme_list = "\n".join(
@@ -38,6 +92,8 @@ class QueryService:
         system = (
             "You are a knowledge base assistant. Answer questions using ONLY the provided knowledge entries. "
             "If the question is too vague, ask for clarification. "
+            "Each entry has a Relevance score (0-1). If the top entry's Relevance is "
+            "below 0.65, prefer clarification or routing over answering directly. "
             "If no relevant knowledge exists, route to the appropriate SME. "
             'Respond in JSON only: { "response_type": "answer"|"clarification"|"routing", '
             '"answer": string (REQUIRED — never null; for routing explain why you are routing), "grounded": boolean, '

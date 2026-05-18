@@ -39,13 +39,14 @@ class VectorRepository:
 
     async def search(
         self, query_embedding: list[float], top_k: int = 5
-    ) -> list[tuple[KnowledgeChunk, KnowledgeEntry]]:
+    ) -> list[tuple[KnowledgeChunk, KnowledgeEntry, float]]:
         pq_ids = pq_index_service.search(query_embedding, top_k)
+        distance_expr = KnowledgeChunk.embedding.cosine_distance(query_embedding)
 
         if pq_ids:
             # PQ pre-filter: load the ranked chunks, keep only approved entries
             stmt = (
-                select(KnowledgeChunk, KnowledgeEntry)
+                select(KnowledgeChunk, KnowledgeEntry, distance_expr.label("distance"))
                 .join(KnowledgeEntry, KnowledgeChunk.entry_id == KnowledgeEntry.id)
                 .where(KnowledgeChunk.id.in_(pq_ids))
                 .where(KnowledgeEntry.status == "approved")
@@ -55,18 +56,18 @@ class VectorRepository:
             # Restore PQ ranking order
             order = {cid: i for i, cid in enumerate(pq_ids)}
             rows.sort(key=lambda r: order.get(r[0].id, len(pq_ids)))
-            return rows[:top_k]
+            return [(r[0], r[1], 1.0 - float(r[2])) for r in rows[:top_k]]
 
         # Fallback: exact pgvector cosine search
         stmt = (
-            select(KnowledgeChunk, KnowledgeEntry)
+            select(KnowledgeChunk, KnowledgeEntry, distance_expr.label("distance"))
             .join(KnowledgeEntry, KnowledgeChunk.entry_id == KnowledgeEntry.id)
             .where(KnowledgeEntry.status == "approved")
-            .order_by(KnowledgeChunk.embedding.cosine_distance(query_embedding))
+            .order_by(distance_expr)
             .limit(top_k)
         )
         result = await self.db.execute(stmt)
-        return result.all()
+        return [(r[0], r[1], 1.0 - float(r[2])) for r in result.all()]
 
     async def delete_by_entry(self, entry_id: str):
         await self.db.execute(delete(KnowledgeChunk).where(KnowledgeChunk.entry_id == entry_id))
