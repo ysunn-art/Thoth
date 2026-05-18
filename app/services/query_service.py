@@ -133,17 +133,104 @@ class QueryService:
             usage=usage_schema,
         )
 
+    def _is_vague_question(self, question: str) -> bool:
+        """
+        Heuristic: a question is 'vague' if it has very few content words
+        or contains no domain-specific terms. Used only when retrieval
+        returns nothing — we want to clarify rather than escalate.
+        """
+        q = question.strip().lower().rstrip("?.!")
+        words = [w for w in q.split() if len(w) > 2]
+
+        if len(words) <= 5:
+            return True
+
+        vague_starters = (
+            "what are the", "what is the", "how does it", "tell me about",
+            "what about", "anything about", "info on", "details on"
+        )
+        if any(q.startswith(s) for s in vague_starters) and len(words) <= 7:
+            return True
+
+        return False
+
+    async def _ask_clarification(
+        self, question: str, session_id: str, smes: list
+    ) -> QueryResponse:
+        domains = "\n".join(f"- {s.specialization}" for s in smes)
+
+        system = (
+            "You are a knowledge base assistant. The user's question is "
+            "too vague to answer or route confidently. Generate ONE short "
+            "clarifying question that asks them which area they're interested in. "
+            "Do NOT answer the original question. Do NOT list all domains in the "
+            "clarifying question — keep it conversational. "
+            'Respond in JSON only: {"clarifying_question": string}'
+        )
+        user_msg = (
+            f"User asked: {question}\n"
+            f"Available knowledge domains:\n{domains}"
+        )
+
+        usage_schema = UsageSchema(prompt_tokens=0, completion_tokens=0, total_tokens=0, model="none")
+        clarifying_question = "Could you provide more details?"
+
+        try:
+            response_text, usage = await llm_client.complete(
+                system=system,
+                messages=[{"role": "user", "content": user_msg}],
+                max_tokens=256,
+            )
+            usage_schema = UsageSchema(
+                prompt_tokens=usage.prompt_tokens,
+                completion_tokens=usage.completion_tokens,
+                total_tokens=usage.total_tokens,
+                model=usage.model,
+            )
+            try:
+                parsed = json.loads(response_text)
+            except json.JSONDecodeError:
+                start = response_text.find("{")
+                end = response_text.rfind("}") + 1
+                parsed = json.loads(response_text[start:end]) if start != -1 else {}
+            clarifying_question = parsed.get("clarifying_question") or clarifying_question
+        except Exception:
+            pass
+
+        session_store.append(session_id, "user", question)
+        session_store.append(session_id, "assistant", clarifying_question)
+
+        return QueryResponse(
+            answer=clarifying_question,
+            grounded=False,
+            sources=[],
+            disclaimer=None,
+            session_id=session_id,
+            response_type="clarification",
+            routed_to=None,
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            usage=usage_schema,
+        )
+
     async def query(self, question: str, session_id: str) -> QueryResponse:
         query_embedding = await llm_client.embed_one(question)
         chunks = await self.vector_repo.search(query_embedding, top_k=5)
 
         if not chunks:
+            # list_all is cached — cheap call
+            smes = await self.sme_repo.list_all()
+            if smes and self._is_vague_question(question):
+                return await self._ask_clarification(question, session_id, smes)
             return await self._route_or_escalate(question, session_id)
 
         RELEVANCE_THRESHOLD = 0.45
         relevant_chunks = [(c, e, s) for c, e, s in chunks if s >= RELEVANCE_THRESHOLD]
 
         if not relevant_chunks:
+            # list_all is cached — _route_or_escalate also fetches internally, acceptable duplication
+            smes = await self.sme_repo.list_all()
+            if smes and self._is_vague_question(question):
+                return await self._ask_clarification(question, session_id, smes)
             return await self._route_or_escalate(question, session_id)
 
         smes = await self.sme_repo.list_all()
