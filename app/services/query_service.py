@@ -146,18 +146,20 @@ class QueryService:
         if not relevant_chunks:
             return await self._route_or_escalate(question, session_id)
 
-        knowledge_context = ""
-        for chunk, entry, sim in relevant_chunks:
-            knowledge_context += (
-                f"[Entry {entry.id} | Topic: {entry.topic} | Relevance: {sim:.2f}]\n"
-                f"{chunk.chunk_text}\n\n"
-            )
-
         smes = await self.sme_repo.list_all()
+        sme_by_id = {s.id: s for s in smes}
         sme_list = "\n".join(
             f"- {s.name} (specialization: {s.specialization}, sub_areas: {', '.join(s.sub_areas)})"
             for s in smes
         )
+
+        knowledge_context = ""
+        for chunk, entry, sim in relevant_chunks:
+            sme_name = sme_by_id[entry.sme_id].name if entry.sme_id in sme_by_id else "Unknown"
+            knowledge_context += (
+                f"[Entry {entry.id} | Topic: {entry.topic} | SME: {sme_name} | Relevance: {sim:.2f}]\n"
+                f"{chunk.chunk_text}\n\n"
+            )
 
         history = session_store.get_history(session_id)
         history_text = ""
@@ -171,7 +173,9 @@ class QueryService:
             "If the question is too vague, ask for clarification. "
             "Each entry has a Relevance score (0-1). If the top entry's Relevance is "
             "below 0.65, prefer clarification or routing over answering directly. "
-            "If no relevant knowledge exists, route to the appropriate SME. "
+            "If the answer is not in the knowledge entries, route to ALL appropriate SMEs — "
+            "there may be multiple relevant specialists, surface all of them. "
+            "When no clear SME match exists, escalate to an administrator. "
             'Respond in JSON only: { "response_type": "answer"|"clarification"|"routing", '
             '"answer": string (REQUIRED — never null; for routing explain why you are routing), "grounded": boolean, '
             '"sources": [{"entry_id": string, "sme_name": string, "topic": string}], '
