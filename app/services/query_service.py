@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from app.repositories.sme_repo import SMERepository
 from app.repositories.knowledge_repo import KnowledgeRepository
 from app.repositories.vector_repo import VectorRepository
-from app.services.llm_client import llm_client
+from app.services.llm_client import llm_client, MODEL_FAST
 from app.services.session_store import session_store
 from app.models.schemas.query import QueryResponse, SourceRef, RoutingTarget, UsageInfo as UsageSchema
 
@@ -71,6 +71,7 @@ class QueryService:
                 system=system,
                 messages=[{"role": "user", "content": user_msg}],
                 max_tokens=512,
+                model=MODEL_FAST,
             )
             usage_schema = UsageSchema(
                 prompt_tokens=usage.prompt_tokens,
@@ -154,29 +155,21 @@ class QueryService:
             "OUTPUT FORMAT (no other text, no markdown, no preamble):\n"
             '{"decision": "route" | "clarify", "clarifying_question": string | null}\n\n'
 
-            "DECISION RULES:\n\n"
+            "STEP 1 — DOMAIN CHECK (mandatory, do this first):\n"
+            "Read the available SME domains. Does this question's LITERAL topic "
+            "appear in ANY of those domains? The topic must DIRECTLY relate, not "
+            "tangentially. If you cannot name at least one domain that addresses "
+            "this question's literal subject matter → output "
+            '{"decision": "route", "clarifying_question": null} '
+            "immediately. Do not proceed to Step 2.\n\n"
 
-            "Choose ROUTE when the question's topic is not part of the listed "
-            "SME domains. This includes:\n"
-            "- General knowledge (physics, chemistry, biology, weather, math, "
-            "geography, history, current events, sports, entertainment, food, "
-            "travel, programming, medicine, etc.)\n"
-            "- Questions about other industries, products, companies, or domains "
-            "not in the list\n"
-            "- Personal questions, opinion questions, small talk\n"
-            "- Questions that vaguely sound like they might relate to a domain "
-            "but actually do not.\n"
-            "When in doubt about whether the topic is in scope: ROUTE.\n\n"
-
-            "Choose CLARIFY only when ALL of the following are true:\n"
-            "- The question uses generic terms (requirements, rules, forms, "
-            "process, procedures, steps, deadlines, fees) WITHOUT naming the "
-            "specific domain.\n"
-            "- The question could plausibly be answered by at least TWO of the "
-            "listed domains.\n"
-            "- The topic itself is clearly within the listed domains, only the "
-            "specific sub-area is unclear.\n"
-            "If any one of these is false: ROUTE.\n\n"
+            "STEP 2 — SPECIFICITY CHECK (only if Step 1 found a matching domain):\n"
+            "Does the question use generic language (requirements, rules, process, "
+            "steps, procedures, deadlines, fees) WITHOUT specifying which domain? "
+            "AND could it plausibly apply to TWO OR MORE of the listed domains?\n"
+            "- If YES to both → CLARIFY. Generate one short clarifying question "
+            "using the actual domain names from the list.\n"
+            "- If NO to either → ROUTE.\n\n"
 
             "FORBIDDEN BEHAVIOR:\n"
             "- Do not output a clarifying_question that asks 'is this about X "
@@ -262,6 +255,7 @@ class QueryService:
         response_text, usage = await llm_client.complete(
             system=system,
             messages=[{"role": "user", "content": user_msg}],
+            model=MODEL_FAST,
         )
 
         try:
@@ -315,6 +309,10 @@ class QueryService:
         relevant_chunks = [(c, e, s) for c, e, s in chunks if s >= RELEVANCE_THRESHOLD]
 
         if not relevant_chunks:
+            top_sim = chunks[0][2] if chunks else 0.0
+
+            if top_sim < 0.30:
+                return await self._route_or_escalate(question, session_id)
             # list_all is cached — _route_or_escalate also fetches internally, acceptable duplication
             smes = await self.sme_repo.list_all()
             if smes:
