@@ -3,9 +3,14 @@ from datetime import datetime, timezone
 from app.repositories.sme_repo import SMERepository
 from app.repositories.knowledge_repo import KnowledgeRepository
 from app.repositories.vector_repo import VectorRepository
-from app.services.llm_client import llm_client, UsageInfo
+from app.services.llm_client import llm_client
 from app.services.session_store import session_store
 from app.models.schemas.query import QueryResponse, SourceRef, RoutingTarget, UsageInfo as UsageSchema
+
+_ADMIN_REFUSAL = (
+    "I don't have any approved knowledge to answer this question. "
+    "Please consult an administrator."
+)
 
 
 class QueryService:
@@ -14,60 +19,132 @@ class QueryService:
         self.knowledge_repo = knowledge_repo
         self.vector_repo = vector_repo
 
+    def _build_admin_escalation(
+        self,
+        session_id: str,
+        reason: str,
+        usage: UsageSchema | None = None,
+    ) -> QueryResponse:
+        return QueryResponse(
+            answer=_ADMIN_REFUSAL,
+            grounded=False,
+            sources=[],
+            disclaimer=None,
+            session_id=session_id,
+            response_type="routing",
+            routed_to=[RoutingTarget(
+                type="admin",
+                sme_name=None,
+                specialization="N/A",
+                reason=reason,
+            )],
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            usage=usage or UsageSchema(prompt_tokens=0, completion_tokens=0, total_tokens=0, model="none"),
+        )
+
+    async def _route_or_escalate(self, question: str, session_id: str) -> QueryResponse:
+        smes = await self.sme_repo.list_all()
+
+        if not smes:
+            session_store.append(session_id, "user", question)
+            session_store.append(session_id, "assistant", _ADMIN_REFUSAL)
+            return self._build_admin_escalation(session_id, "No SMEs are registered in the system.")
+
+        sme_list = "\n".join(
+            f"- {s.name} (specialization: {s.specialization}, sub_areas: {', '.join(s.sub_areas)})"
+            for s in smes
+        )
+
+        system = (
+            "You are a routing assistant. Given a question and a list of SMEs, identify which SMEs "
+            "can help based on their specialization and sub_areas. "
+            'Respond in JSON only: {"matches": [{"sme_name": string, "specialization": string, "reason": string}]} '
+            "— use an empty matches array if no SME fits."
+        )
+        user_msg = f"Question: {question}\n\nAvailable SMEs:\n{sme_list}"
+
+        usage_schema = UsageSchema(prompt_tokens=0, completion_tokens=0, total_tokens=0, model="none")
+        matches = []
+
+        try:
+            response_text, usage = await llm_client.complete(
+                system=system,
+                messages=[{"role": "user", "content": user_msg}],
+                max_tokens=512,
+            )
+            usage_schema = UsageSchema(
+                prompt_tokens=usage.prompt_tokens,
+                completion_tokens=usage.completion_tokens,
+                total_tokens=usage.total_tokens,
+                model=usage.model,
+            )
+            try:
+                parsed = json.loads(response_text)
+            except json.JSONDecodeError:
+                start = response_text.find("{")
+                end = response_text.rfind("}") + 1
+                parsed = json.loads(response_text[start:end]) if start != -1 else {}
+            matches = parsed.get("matches") or []
+        except Exception:
+            pass  # usage_schema stays zero, matches stays []
+
+        session_store.append(session_id, "user", question)
+
+        if not matches:
+            session_store.append(session_id, "assistant", _ADMIN_REFUSAL)
+            return self._build_admin_escalation(
+                session_id,
+                "No SME specialization matches this question.",
+                usage_schema,
+            )
+
+        routed_to = [
+            RoutingTarget(
+                type="sme",
+                sme_name=m["sme_name"],
+                specialization=m["specialization"],
+                reason=m["reason"],
+            )
+            for m in matches
+        ]
+
+        if len(matches) == 1:
+            answer = (
+                f"I don't have approved knowledge on this specific topic, "
+                f"but {matches[0]['sme_name']} specializes in this area and can help."
+            )
+        else:
+            names = ", ".join(m["sme_name"] for m in matches)
+            answer = (
+                f"This question spans multiple areas of expertise. "
+                f"I recommend consulting: {names}."
+            )
+
+        session_store.append(session_id, "assistant", answer)
+        return QueryResponse(
+            answer=answer,
+            grounded=False,
+            sources=[],
+            disclaimer=None,
+            session_id=session_id,
+            response_type="routing",
+            routed_to=routed_to,
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            usage=usage_schema,
+        )
+
     async def query(self, question: str, session_id: str) -> QueryResponse:
         query_embedding = await llm_client.embed_one(question)
         chunks = await self.vector_repo.search(query_embedding, top_k=3)
 
         if not chunks:
-            session_store.append(session_id, "user", question)
-            refusal = (
-                "I don't have any approved knowledge to answer this question. "
-                "Please consult an administrator."
-            )
-            session_store.append(session_id, "assistant", refusal)
-            return QueryResponse(
-                answer=refusal,
-                grounded=False,
-                sources=[],
-                disclaimer=None,
-                session_id=session_id,
-                response_type="routing",
-                routed_to=[RoutingTarget(
-                    type="admin",
-                    sme_name=None,
-                    specialization="N/A",
-                    reason="Knowledge base is empty or no relevant content exists.",
-                )],
-                timestamp=datetime.now(timezone.utc).isoformat(),
-                usage=UsageSchema(prompt_tokens=0, completion_tokens=0, total_tokens=0, model="none"),
-            )
+            return await self._route_or_escalate(question, session_id)
 
         RELEVANCE_THRESHOLD = 0.45
         relevant_chunks = [(c, e, s) for c, e, s in chunks if s >= RELEVANCE_THRESHOLD]
 
         if not relevant_chunks:
-            session_store.append(session_id, "user", question)
-            refusal = (
-                "I don't have any approved knowledge to answer this question. "
-                "Please consult an administrator."
-            )
-            session_store.append(session_id, "assistant", refusal)
-            return QueryResponse(
-                answer=refusal,
-                grounded=False,
-                sources=[],
-                disclaimer=None,
-                session_id=session_id,
-                response_type="routing",
-                routed_to=[RoutingTarget(
-                    type="admin",
-                    sme_name=None,
-                    specialization="N/A",
-                    reason="Knowledge base is empty or no relevant content exists.",
-                )],
-                timestamp=datetime.now(timezone.utc).isoformat(),
-                usage=UsageSchema(prompt_tokens=0, completion_tokens=0, total_tokens=0, model="none"),
-            )
+            return await self._route_or_escalate(question, session_id)
 
         knowledge_context = ""
         for chunk, entry, sim in relevant_chunks:
@@ -109,7 +186,10 @@ class QueryService:
             f"Available SMEs:\n{sme_list or '(none)'}"
         )
 
-        response_text, usage = await llm_client.complete(system=system, messages=[{"role": "user", "content": user_msg}])
+        response_text, usage = await llm_client.complete(
+            system=system,
+            messages=[{"role": "user", "content": user_msg}],
+        )
 
         try:
             parsed = json.loads(response_text)
