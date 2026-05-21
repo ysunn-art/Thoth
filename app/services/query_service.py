@@ -3,8 +3,11 @@ from datetime import datetime, timezone
 from app.repositories.sme_repo import SMERepository
 from app.repositories.knowledge_repo import KnowledgeRepository
 from app.repositories.vector_repo import VectorRepository
+import logging
 from app.services.llm_client import llm_client, MODEL_FAST
 from app.services.session_store import session_store
+
+logger = logging.getLogger(__name__)
 from app.models.schemas.query import QueryResponse, SourceRef, RoutingTarget, UsageInfo as UsageSchema
 
 _ADMIN_REFUSAL = (
@@ -86,8 +89,8 @@ class QueryService:
                 end = response_text.rfind("}") + 1
                 parsed = json.loads(response_text[start:end]) if start != -1 else {}
             matches = parsed.get("matches") or []
-        except Exception:
-            pass  # usage_schema stays zero, matches stays []
+        except Exception as exc:
+            logger.error("LLM call failed in _route_or_escalate: %s", exc, exc_info=True)
 
         session_store.append(session_id, "user", question)
 
