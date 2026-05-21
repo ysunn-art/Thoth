@@ -1,14 +1,14 @@
 import json
+import logging
 from datetime import datetime, timezone
 from app.repositories.sme_repo import SMERepository
 from app.repositories.knowledge_repo import KnowledgeRepository
 from app.repositories.vector_repo import VectorRepository
-import logging
 from app.services.llm_client import llm_client, MODEL_FAST
 from app.services.session_store import session_store
+from app.models.schemas.query import QueryResponse, SourceRef, RoutingTarget, UsageInfo as UsageSchema
 
 logger = logging.getLogger(__name__)
-from app.models.schemas.query import QueryResponse, SourceRef, RoutingTarget, UsageInfo as UsageSchema
 
 _ADMIN_REFUSAL = (
     "I don't have any approved knowledge to answer this question. "
@@ -45,13 +45,14 @@ class QueryService:
             usage=usage or UsageSchema(prompt_tokens=0, completion_tokens=0, total_tokens=0, model="none"),
         )
 
-    async def _route_or_escalate(self, question: str, session_id: str) -> QueryResponse:
+    async def _route_or_escalate(self, question: str, session_id: str, carry_usage: UsageSchema | None = None) -> QueryResponse:
         smes = await self.sme_repo.list_all()
 
         if not smes:
             session_store.append(session_id, "user", question)
             session_store.append(session_id, "assistant", _ADMIN_REFUSAL)
-            return self._build_admin_escalation(session_id, "No SMEs are registered in the system.")
+            carry = carry_usage or UsageSchema(prompt_tokens=0, completion_tokens=0, total_tokens=0, model="none")
+            return self._build_admin_escalation(session_id, "No SMEs are registered in the system.", carry)
 
         sme_list = "\n".join(
             f"- {s.name} (specialization: {s.specialization}, sub_areas: {', '.join(s.sub_areas)})"
@@ -91,6 +92,14 @@ class QueryService:
             matches = parsed.get("matches") or []
         except Exception as exc:
             logger.error("LLM call failed in _route_or_escalate: %s", exc, exc_info=True)
+
+        if carry_usage:
+            usage_schema = UsageSchema(
+                prompt_tokens=usage_schema.prompt_tokens + carry_usage.prompt_tokens,
+                completion_tokens=usage_schema.completion_tokens + carry_usage.completion_tokens,
+                total_tokens=usage_schema.total_tokens + carry_usage.total_tokens,
+                model=usage_schema.model,
+            )
 
         session_store.append(session_id, "user", question)
 
@@ -293,9 +302,14 @@ class QueryService:
 
         # decision == "route" — fall through to existing routing path.
         # Note: this triggers a second LLM call inside _route_or_escalate
-        # to match the question to an SME. The total token cost (~400-600
-        # for two short prompts) is acceptable for correct semantic routing.
-        return await self._route_or_escalate(question, session_id)
+        # to match the question to an SME. Accumulate token totals across both calls.
+        carry = UsageSchema(
+            prompt_tokens=usage.prompt_tokens,
+            completion_tokens=usage.completion_tokens,
+            total_tokens=usage.total_tokens,
+            model=usage.model,
+        )
+        return await self._route_or_escalate(question, session_id, carry_usage=carry)
 
     async def query(self, question: str, session_id: str) -> QueryResponse:
         query_embedding = await llm_client.embed_one(question)
