@@ -25,9 +25,23 @@ class TurnResponse(BaseModel):
     usage: Optional[UsageInfo] = None
 
 
+class TurnSummary(BaseModel):
+    turn_number: int
+    sme_response: str
+    agent_follow_up: Optional[str]
+    timestamp: str
+
+
 class InterviewResponse(BaseModel):
     interview_id: str
     sme_id: str
+    topic: str
+    status: str
+    created_at: str
+
+
+class InterviewSummary(BaseModel):
+    interview_id: str
     topic: str
     status: str
     created_at: str
@@ -38,8 +52,8 @@ class InterviewTranscript(BaseModel):
     sme_id: str
     topic: str
     status: str
-    turns: List[TurnResponse]
+    turns: List[TurnSummary]
 
 
 class InterviewListResponse(BaseModel):
-    interviews: List[InterviewResponse]
+    interviews: List[InterviewSummary]

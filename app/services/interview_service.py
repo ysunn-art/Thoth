@@ -6,6 +6,7 @@ from app.models.schemas.interview import InterviewCreate, TurnCreate
 from app.services.llm_client import llm_client, UsageInfo, MODEL_FAST
 from app.core.ids import new_id
 from app.core.errors import raise_not_found
+from app.core.sanitize import sanitize_input
 
 COMPLETE_SIGNAL = "[INTERVIEW_COMPLETE]"
 
@@ -41,10 +42,10 @@ class InterviewService:
 
         messages = []
         for t in prior_turns:
-            messages.append({"role": "user", "content": f"SME said: {t.sme_response}"})
+            messages.append({"role": "user", "content": f"SME said: {sanitize_input(t.sme_response)}"})
             if t.agent_follow_up:
                 messages.append({"role": "assistant", "content": t.agent_follow_up})
-        messages.append({"role": "user", "content": f"SME said: {data.sme_response}"})
+        messages.append({"role": "user", "content": f"SME said: {sanitize_input(data.sme_response)}"})
 
         system = (
             f"You are conducting a knowledge elicitation interview with an SME. "

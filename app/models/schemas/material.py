@@ -12,5 +12,13 @@ class MaterialResponse(BaseModel):
     usage: Optional[dict] = None
 
 
+class MaterialSummary(BaseModel):
+    material_id: str
+    title: str
+    file_type: str
+    status: str
+    created_at: str
+
+
 class MaterialListResponse(BaseModel):
-    materials: List[MaterialResponse]
+    materials: List[MaterialSummary]

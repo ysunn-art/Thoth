@@ -5,7 +5,8 @@ from app.db.session import get_db
 from app.core.auth import verify_api_key
 from app.models.schemas.knowledge import (
     SynthesizeRequest, KnowledgeUpdate, RejectRequest,
-    KnowledgeEntryResponse, KnowledgeListResponse, Sources,
+    KnowledgeEntryResponse, KnowledgeSynthesizeResponse, KnowledgeReadResponse,
+    KnowledgeListResponse, Sources,
     ApproveResponse, AdminApproveResponse, RejectResponse, UsageInfo,
 )
 from app.services.knowledge_service import KnowledgeService
@@ -28,8 +29,29 @@ def _make_service(db: AsyncSession) -> KnowledgeService:
     )
 
 
-def _to_response(entry, usage=None) -> KnowledgeEntryResponse:
-    return KnowledgeEntryResponse(
+def _to_synthesize_response(entry, usage=None) -> KnowledgeSynthesizeResponse:
+    return KnowledgeSynthesizeResponse(
+        entry_id=entry.id,
+        sme_id=entry.sme_id,
+        topic=entry.topic,
+        status=entry.status,
+        content=entry.content,
+        sources=Sources(
+            interviews=entry.source_interviews or [],
+            materials=entry.source_materials or [],
+        ),
+        created_at=entry.created_at.isoformat(),
+        usage=UsageInfo(
+            prompt_tokens=usage.prompt_tokens,
+            completion_tokens=usage.completion_tokens,
+            total_tokens=usage.total_tokens,
+            model=usage.model,
+        ) if usage else None,
+    )
+
+
+def _to_read_response(entry) -> KnowledgeReadResponse:
+    return KnowledgeReadResponse(
         entry_id=entry.id,
         sme_id=entry.sme_id,
         topic=entry.topic,
@@ -41,37 +63,31 @@ def _to_response(entry, usage=None) -> KnowledgeEntryResponse:
         ),
         created_at=entry.created_at.isoformat(),
         updated_at=entry.updated_at.isoformat(),
-        usage=UsageInfo(
-            prompt_tokens=usage.prompt_tokens,
-            completion_tokens=usage.completion_tokens,
-            total_tokens=usage.total_tokens,
-            model=usage.model,
-        ) if usage else None,
     )
 
 
-@router.post("/smes/{sme_id}/knowledge/synthesize", status_code=201, response_model=KnowledgeEntryResponse)
+@router.post("/smes/{sme_id}/knowledge/synthesize", status_code=201, response_model=KnowledgeSynthesizeResponse)
 async def synthesize(sme_id: str, data: SynthesizeRequest, db: AsyncSession = Depends(get_db)):
     entry, usage = await _make_service(db).synthesize(sme_id, data)
-    return _to_response(entry, usage)
+    return _to_synthesize_response(entry, usage)
 
 
 @router.get("/knowledge", response_model=KnowledgeListResponse)
 async def list_entries(status: Optional[str] = None, db: AsyncSession = Depends(get_db)):
     entries = await _make_service(db).list_entries(status)
-    return KnowledgeListResponse(entries=[_to_response(e) for e in entries])
+    return KnowledgeListResponse(entries=[_to_read_response(e) for e in entries])
 
 
-@router.get("/knowledge/{entry_id}", response_model=KnowledgeEntryResponse)
+@router.get("/knowledge/{entry_id}", response_model=KnowledgeReadResponse)
 async def get_entry(entry_id: str, db: AsyncSession = Depends(get_db)):
     entry = await _make_service(db).get_entry(entry_id)
-    return _to_response(entry)
+    return _to_read_response(entry)
 
 
-@router.put("/knowledge/{entry_id}", response_model=KnowledgeEntryResponse)
+@router.put("/knowledge/{entry_id}", response_model=KnowledgeReadResponse)
 async def update_entry(entry_id: str, data: KnowledgeUpdate, db: AsyncSession = Depends(get_db)):
     entry = await _make_service(db).update_entry(entry_id, data)
-    return _to_response(entry)
+    return _to_read_response(entry)
 
 
 @router.post("/knowledge/{entry_id}/approve", response_model=ApproveResponse)

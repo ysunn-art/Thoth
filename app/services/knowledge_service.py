@@ -16,8 +16,8 @@ import io
 
 logger = logging.getLogger(__name__)
 
-CHUNK_SIZE = 2000
-CHUNK_OVERLAP = 200
+CHUNK_SIZE = 800
+CHUNK_OVERLAP = 100
 
 
 def _parse_file(content: bytes, file_type: str) -> str:
@@ -101,7 +101,20 @@ class KnowledgeService:
             f"MATERIALS:\n{''.join(materials_text)}"
         )
 
-        system = "You are synthesizing expert knowledge into a clear, structured knowledge base entry."
+        system = (
+            "You are synthesizing SME knowledge into a structured knowledge base entry. "
+            "Follow this organization:\n"
+            "1. OVERVIEW — 2-3 sentence summary of the topic\n"
+            "2. KEY CONCEPTS — bullet points of core definitions, rules, or frameworks\n"
+            "3. DETAILED PROCEDURES — step-by-step procedures mentioned in the sources\n"
+            "4. REFERENCES — cite specific article numbers, section names, or document titles from the source material\n"
+            "5. CAVEATS — important limitations, exceptions, or edge cases\n\n"
+            "Quality rules:\n"
+            "- Only synthesize from the provided transcripts and materials. Do not add external knowledge.\n"
+            "- If interview and material conflict, note the conflict explicitly.\n"
+            "- Prefer specific facts over general statements.\n"
+            "- Do not fabricate article numbers — only cite what appears in the sources."
+        )
         content, usage = await llm_client.complete(
             system=system,
             messages=[{"role": "user", "content": user_msg}],

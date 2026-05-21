@@ -4,7 +4,8 @@ from app.db.session import get_db
 from app.core.auth import verify_api_key
 from app.models.schemas.interview import (
     InterviewCreate, InterviewResponse, InterviewListResponse,
-    TurnCreate, TurnResponse, InterviewTranscript, UsageInfo,
+    TurnCreate, TurnResponse, TurnSummary, InterviewTranscript,
+    InterviewSummary, UsageInfo,
 )
 from app.services.interview_service import InterviewService
 from app.repositories.interview_repo import InterviewRepository
@@ -17,6 +18,15 @@ def _interview_response(interview) -> InterviewResponse:
     return InterviewResponse(
         interview_id=interview.id,
         sme_id=interview.sme_id,
+        topic=interview.topic,
+        status=interview.status,
+        created_at=interview.created_at.isoformat(),
+    )
+
+
+def _interview_summary(interview) -> InterviewSummary:
+    return InterviewSummary(
+        interview_id=interview.id,
         topic=interview.topic,
         status=interview.status,
         created_at=interview.created_at.isoformat(),
@@ -38,11 +48,20 @@ def _turn_response(turn, usage=None) -> TurnResponse:
     )
 
 
+def _turn_summary(turn) -> TurnSummary:
+    return TurnSummary(
+        turn_number=turn.turn_number,
+        sme_response=turn.sme_response,
+        agent_follow_up=turn.agent_follow_up,
+        timestamp=turn.timestamp.isoformat(),
+    )
+
+
 @router.get("/smes/{sme_id}/interviews", response_model=InterviewListResponse)
 async def list_interviews(sme_id: str, db: AsyncSession = Depends(get_db)):
     service = InterviewService(InterviewRepository(db), SMERepository(db))
     interviews = await service.list_interviews(sme_id)
-    return InterviewListResponse(interviews=[_interview_response(i) for i in interviews])
+    return InterviewListResponse(interviews=[_interview_summary(i) for i in interviews])
 
 
 @router.post("/smes/{sme_id}/interviews", status_code=201, response_model=InterviewResponse)
@@ -69,5 +88,5 @@ async def get_interview(interview_id: str, db: AsyncSession = Depends(get_db)):
         sme_id=interview.sme_id,
         topic=interview.topic,
         status=interview.status,
-        turns=[_turn_response(t) for t in turns],
+        turns=[_turn_summary(t) for t in turns],
     )

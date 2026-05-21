@@ -7,3 +7,6 @@ pq_index.pkl
 *.egg-info/
 .venv/
 venv/
+.DS_Store
+*.DS_Store
+.idea/

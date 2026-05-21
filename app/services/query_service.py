@@ -7,6 +7,7 @@ from app.repositories.vector_repo import VectorRepository
 from app.services.llm_client import llm_client, MODEL_FAST
 from app.services.session_store import session_store
 from app.models.schemas.query import QueryResponse, SourceRef, RoutingTarget, UsageInfo as UsageSchema
+from app.core.sanitize import sanitize_input
 
 logger = logging.getLogger(__name__)
 
@@ -45,65 +46,77 @@ class QueryService:
             usage=usage or UsageSchema(prompt_tokens=0, completion_tokens=0, total_tokens=0, model="none"),
         )
 
-    async def _route_or_escalate(self, question: str, session_id: str, carry_usage: UsageSchema | None = None) -> QueryResponse:
+    async def _classify_and_route(self, question: str, session_id: str) -> QueryResponse:
         smes = await self.sme_repo.list_all()
 
         if not smes:
             session_store.append(session_id, "user", question)
             session_store.append(session_id, "assistant", _ADMIN_REFUSAL)
-            carry = carry_usage or UsageSchema(prompt_tokens=0, completion_tokens=0, total_tokens=0, model="none")
-            return self._build_admin_escalation(session_id, "No SMEs are registered in the system.", carry)
+            return self._build_admin_escalation(session_id, "No SMEs are registered in the system.")
 
-        sme_list = "\n".join(
-            f"- {s.name} (specialization: {s.specialization}, sub_areas: {', '.join(s.sub_areas)})"
+        sme_context = "\n".join(
+            f"- {s.name}: specialization={s.specialization}, sub_areas=[{', '.join(s.sub_areas)}]"
             for s in smes
         )
 
         system = (
-            "You are a routing assistant. Given a question and a list of SMEs, identify which SMEs "
-            "can help based on their specialization and sub_areas. "
-            'Respond in JSON only: {"matches": [{"sme_name": string, "specialization": string, "reason": string}]} '
-            "— use an empty matches array if no SME fits."
+            "Classify this user question against available SME domains. "
+            "Use BOTH specialization and sub_areas for matching. "
+            "Output JSON only:\n"
+            '{"decision": "clarify"|"route", "clarifying_question": null|string, '
+            '"routed_to": [{"sme_name": string, "reason": string}]}\n\n'
+            "Rules:\n"
+            '- "clarify": question is too vague AND could apply to ≥2 domains → ask which one\n'
+            '- "route": question is clear but outside all domains → empty routed_to\n'
+            '- "route": question matches a domain but lacks knowledge → populate routed_to with matching SMEs\n'
+            "- Only route to SMEs whose listed expertise (specialization OR sub_areas) directly covers the question topic.\n"
+            "- Be strict: if no domain matches, use empty routed_to."
         )
-        user_msg = f"Question: {question}\n\nAvailable SMEs:\n{sme_list}"
+        user_msg = f"Question: {question}\n\nAvailable SMEs:\n{sme_context}"
 
-        usage_schema = UsageSchema(prompt_tokens=0, completion_tokens=0, total_tokens=0, model="none")
-        matches = []
+        response_text, usage = await llm_client.complete(
+            system=system,
+            messages=[{"role": "user", "content": user_msg}],
+            max_tokens=512,
+            model=MODEL_FAST,
+        )
 
         try:
-            response_text, usage = await llm_client.complete(
-                system=system,
-                messages=[{"role": "user", "content": user_msg}],
-                max_tokens=512,
-                model=MODEL_FAST,
-            )
-            usage_schema = UsageSchema(
-                prompt_tokens=usage.prompt_tokens,
-                completion_tokens=usage.completion_tokens,
-                total_tokens=usage.total_tokens,
-                model=usage.model,
-            )
-            try:
-                parsed = json.loads(response_text)
-            except json.JSONDecodeError:
-                start = response_text.find("{")
-                end = response_text.rfind("}") + 1
-                parsed = json.loads(response_text[start:end]) if start != -1 else {}
-            matches = parsed.get("matches") or []
-        except Exception as exc:
-            logger.error("LLM call failed in _route_or_escalate: %s", exc, exc_info=True)
+            parsed = json.loads(response_text)
+        except json.JSONDecodeError:
+            start = response_text.find("{")
+            end = response_text.rfind("}") + 1
+            parsed = json.loads(response_text[start:end]) if start != -1 else {}
 
-        if carry_usage:
-            usage_schema = UsageSchema(
-                prompt_tokens=usage_schema.prompt_tokens + carry_usage.prompt_tokens,
-                completion_tokens=usage_schema.completion_tokens + carry_usage.completion_tokens,
-                total_tokens=usage_schema.total_tokens + carry_usage.total_tokens,
-                model=usage_schema.model,
+        decision = parsed.get("decision", "route")
+        clarifying_q = parsed.get("clarifying_question")
+        routed_raw = parsed.get("routed_to") or []
+
+        usage_schema = UsageSchema(
+            prompt_tokens=usage.prompt_tokens,
+            completion_tokens=usage.completion_tokens,
+            total_tokens=usage.total_tokens,
+            model=usage.model,
+        )
+
+        if decision == "clarify" and clarifying_q:
+            session_store.append(session_id, "user", question)
+            session_store.append(session_id, "assistant", clarifying_q)
+            return QueryResponse(
+                answer=clarifying_q,
+                grounded=False,
+                sources=[],
+                disclaimer=None,
+                session_id=session_id,
+                response_type="clarification",
+                routed_to=None,
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                usage=usage_schema,
             )
 
         session_store.append(session_id, "user", question)
 
-        if not matches:
+        if not routed_raw:
             session_store.append(session_id, "assistant", _ADMIN_REFUSAL)
             return self._build_admin_escalation(
                 session_id,
@@ -111,23 +124,25 @@ class QueryService:
                 usage_schema,
             )
 
-        routed_to = [
-            RoutingTarget(
+        sme_map = {s.name: s for s in smes}
+        routed_to = []
+        for r in routed_raw:
+            sme_name = r.get("sme_name", "")
+            sme = sme_map.get(sme_name)
+            routed_to.append(RoutingTarget(
                 type="sme",
-                sme_name=m["sme_name"],
-                specialization=m["specialization"],
-                reason=m["reason"],
-            )
-            for m in matches
-        ]
+                sme_name=sme_name if sme else None,
+                specialization=sme.specialization if sme else "N/A",
+                reason=r.get("reason", ""),
+            ))
 
-        if len(matches) == 1:
+        if len(routed_to) == 1:
             answer = (
                 f"I don't have approved knowledge on this specific topic, "
-                f"but {matches[0]['sme_name']} specializes in this area and can help."
+                f"but {routed_to[0].sme_name} specializes in this area and can help."
             )
         else:
-            names = ", ".join(m["sme_name"] for m in matches)
+            names = ", ".join(rt.sme_name for rt in routed_to if rt.sme_name)
             answer = (
                 f"This question spans multiple areas of expertise. "
                 f"I recommend consulting: {names}."
@@ -146,195 +161,26 @@ class QueryService:
             usage=usage_schema,
         )
 
-    async def _ask_or_route(
-        self, question: str, session_id: str, smes: list
-    ) -> QueryResponse:
-        """
-        No relevant knowledge was retrieved. Use the LLM to decide:
-        - CLARIFY if the question is under-specified but could plausibly
-          fit one or more of the available SME domains
-        - ROUTE if the question is clear but clearly outside all SME
-          domains (fall through to _route_or_escalate)
-        """
-        domains = "\n".join(f"- {s.specialization}" for s in smes)
-
-        system = (
-            "You are a strict routing classifier. Your only job is to choose "
-            "between ROUTE and CLARIFY. You are NOT a helpful assistant — do "
-            "not try to be friendly or offer the user multiple choices. Choose "
-            "exactly one action and output JSON.\n\n"
-
-            "OUTPUT FORMAT (no other text, no markdown, no preamble):\n"
-            '{"decision": "route" | "clarify", "clarifying_question": string | null}\n\n'
-
-            "STEP 1 — DOMAIN CHECK (mandatory, do this first):\n"
-            "Read the available SME domains. Does this question's LITERAL topic "
-            "appear in ANY of those domains? The topic must DIRECTLY relate, not "
-            "tangentially. If you cannot name at least one domain that addresses "
-            "this question's literal subject matter → output "
-            '{"decision": "route", "clarifying_question": null} '
-            "immediately. Do not proceed to Step 2.\n\n"
-
-            "STEP 2 — SPECIFICITY CHECK (only if Step 1 found a matching domain):\n"
-            "Does the question use generic language (requirements, rules, process, "
-            "steps, procedures, deadlines, fees) WITHOUT specifying which domain? "
-            "AND could it plausibly apply to TWO OR MORE of the listed domains?\n"
-            "- If YES to both → CLARIFY. Generate one short clarifying question "
-            "using the actual domain names from the list.\n"
-            "- If NO to either → ROUTE.\n\n"
-
-            "FORBIDDEN BEHAVIOR:\n"
-            "- Do not output a clarifying_question that asks 'is this about X "
-            "or something else?' — that pattern means you should ROUTE, not "
-            "clarify.\n"
-            "- Do not offer the user a chance to rephrase off-topic questions.\n"
-            "- Do not say 'I notice your question is about X but my knowledge "
-            "is about Y' — that is a ROUTE case, not a CLARIFY case.\n"
-            "- If you find yourself wanting to mention the user's topic and the "
-            "knowledge domains in the same clarifying question, stop and "
-            "choose ROUTE instead.\n\n"
-
-            "EXAMPLES (the domains shown are illustrative; apply the same "
-            "reasoning to whichever domains appear in the actual input):\n\n"
-
-            "Input:\n"
-            "User question: How do birds fly?\n"
-            "Available domains:\n"
-            "- Software Engineering Best Practices\n"
-            "- Database Administration\n"
-            "- Network Security\n"
-            "Output:\n"
-            '{"decision": "route", "clarifying_question": null}\n\n'
-
-            "Input:\n"
-            "User question: What is the capital of France?\n"
-            "Available domains:\n"
-            "- Pharmaceutical Regulatory Affairs\n"
-            "- Clinical Trial Design\n"
-            "Output:\n"
-            '{"decision": "route", "clarifying_question": null}\n\n'
-
-            "Input:\n"
-            "User question: What is the latest version of Python?\n"
-            "Available domains:\n"
-            "- Tax Law\n"
-            "- Estate Planning\n"
-            "- Immigration Law\n"
-            "Output:\n"
-            '{"decision": "route", "clarifying_question": null}\n\n'
-
-            "Input:\n"
-            "User question: What are the requirements?\n"
-            "Available domains:\n"
-            "- Software Engineering Best Practices\n"
-            "- Database Administration\n"
-            "- Network Security\n"
-            "Output:\n"
-            '{"decision": "clarify", "clarifying_question": "Which area are '
-            'you asking about — software engineering, database administration, '
-            'or network security?"}\n\n'
-
-            "Input:\n"
-            "User question: Tell me about the process\n"
-            "Available domains:\n"
-            "- Tax Law\n"
-            "- Estate Planning\n"
-            "- Immigration Law\n"
-            "Output:\n"
-            '{"decision": "clarify", "clarifying_question": "Which process — '
-            'tax filing, estate planning, or immigration?"}\n\n'
-
-            "Input:\n"
-            "User question: How do I learn JavaScript and also what are tax rules?\n"
-            "Available domains:\n"
-            "- Tax Law\n"
-            "- Estate Planning\n"
-            "Output:\n"
-            '{"decision": "route", "clarifying_question": null}\n\n'
-
-            "Note: in the CLARIFY examples, notice that the clarifying_question "
-            "lists the actual domain names from the available domains list. "
-            "When you produce a real clarifying question, do the same — use the "
-            "actual domain names provided in the input, not the example names.\n\n"
-
-            "Now classify the user's question. Output JSON only."
-        )
-        user_msg = (
-            f"User question: {question}\n\n"
-            f"Available SME specialization domains:\n{domains}"
-        )
-
-        response_text, usage = await llm_client.complete(
-            system=system,
-            messages=[{"role": "user", "content": user_msg}],
-            model=MODEL_FAST,
-        )
-
-        try:
-            parsed = json.loads(response_text)
-        except json.JSONDecodeError:
-            start = response_text.find("{")
-            end = response_text.rfind("}") + 1
-            parsed = json.loads(response_text[start:end]) if start != -1 else {}
-
-        decision = parsed.get("decision", "route")
-        clarifying_q = parsed.get("clarifying_question")
-
-        if decision == "clarify" and clarifying_q:
-            session_store.append(session_id, "user", question)
-            session_store.append(session_id, "assistant", clarifying_q)
-            return QueryResponse(
-                answer=clarifying_q,
-                grounded=False,
-                sources=[],
-                disclaimer=None,
-                session_id=session_id,
-                response_type="clarification",
-                routed_to=None,
-                timestamp=datetime.now(timezone.utc).isoformat(),
-                usage=UsageSchema(
-                    prompt_tokens=usage.prompt_tokens,
-                    completion_tokens=usage.completion_tokens,
-                    total_tokens=usage.total_tokens,
-                    model=usage.model,
-                ),
-            )
-
-        # decision == "route" — fall through to existing routing path.
-        # Note: this triggers a second LLM call inside _route_or_escalate
-        # to match the question to an SME. Accumulate token totals across both calls.
-        carry = UsageSchema(
-            prompt_tokens=usage.prompt_tokens,
-            completion_tokens=usage.completion_tokens,
-            total_tokens=usage.total_tokens,
-            model=usage.model,
-        )
-        return await self._route_or_escalate(question, session_id, carry_usage=carry)
-
     async def query(self, question: str, session_id: str) -> QueryResponse:
+        question = sanitize_input(question)
         query_embedding = await llm_client.embed_one(question)
-        chunks = await self.vector_repo.search(query_embedding, top_k=5)
+        chunks = await self.vector_repo.search(query_embedding, top_k=8)
 
         if not chunks:
-            # list_all is cached — cheap call
-            smes = await self.sme_repo.list_all()
-            if smes:
-                return await self._ask_or_route(question, session_id, smes)
-            return await self._route_or_escalate(question, session_id)
+            return await self._classify_and_route(question, session_id)
 
         RELEVANCE_THRESHOLD = 0.45
         relevant_chunks = [(c, e, s) for c, e, s in chunks if s >= RELEVANCE_THRESHOLD]
 
+        print(f"[RETRIEVAL] total={len(chunks)} above_threshold={len(relevant_chunks)}", flush=True)
+        for _, e, s in chunks:
+            print(f"  sim={s:.3f} entry={e.id} sme_id={e.sme_id} topic={e.topic[:40]!r}", flush=True)
+
         if not relevant_chunks:
             top_sim = chunks[0][2] if chunks else 0.0
-
             if top_sim < 0.30:
-                return await self._route_or_escalate(question, session_id)
-            # list_all is cached — _route_or_escalate also fetches internally, acceptable duplication
-            smes = await self.sme_repo.list_all()
-            if smes:
-                return await self._ask_or_route(question, session_id, smes)
-            return await self._route_or_escalate(question, session_id)
+                return await self._classify_and_route(question, session_id)
+            return await self._classify_and_route(question, session_id)
 
         smes = await self.sme_repo.list_all()
         sme_by_id = {s.id: s for s in smes}
@@ -360,16 +206,36 @@ class QueryService:
 
         system = (
             "You are a knowledge base assistant. Answer questions using ONLY the provided knowledge entries. "
-            "If the question is too vague, ask for clarification. "
-            "If the retrieved knowledge entries come from two or more different SMEs "
-            "(different sme_name across sources) and the question genuinely spans both "
-            "specializations, set response_type='routing' and list ALL relevant SMEs in "
-            "routed_to, rather than answering with knowledge from only one. "
+            "PRIMARY DIRECTIVE: When retrieved knowledge contains the answer, "
+            "provide a grounded answer with citations. Do not refuse to answer "
+            "because of minor terminology mismatches between the question and "
+            "the source (e.g., the question says 'Tier-1 jurisdictions' and the "
+            "source says 'Tier-1 restricted jurisdictions' — these refer to the "
+            "same thing). "
+            "Use clarification ONLY when the question is genuinely ambiguous "
+            "between two or more topics in the knowledge base. Do not use "
+            "clarification as a hedge when you are uncertain — commit to a "
+            "grounded answer with appropriate caveats instead. "
+            "When the retrieved knowledge comes from multiple SMEs whose expertise "
+            "is complementary on the question, synthesize an answer that draws from "
+            "ALL relevant sources and cite every contributing source in the sources array. "
+            "Only route to SMEs (response_type='routing') when the knowledge is insufficient "
+            "to answer — not simply because multiple SMEs are involved. "
             "Each entry has a Relevance score (0-1). If the top entry's Relevance is "
             "below 0.65, prefer clarification or routing over answering directly. "
             "If the answer is not in the knowledge entries, route to ALL appropriate SMEs — "
             "there may be multiple relevant specialists, surface all of them. "
             "When no clear SME match exists, escalate to an administrator. "
+            "Keep answers concise but complete — 2 to 4 paragraphs. Avoid repeating information verbatim from the sources. "
+            "GROUNDED ANSWER REQUIREMENTS (response_type='answer'):\n"
+            "- Cite ALL source entry_ids that contributed information to the answer\n"
+            "- Include a 1-sentence paraphrase or quote from the knowledge that supports your answer\n"
+            '- ALWAYS set disclaimer to "This information is based on approved SME knowledge and may not constitute professional advice."\n'
+            "- If sources differ in details, present the most directly relevant source's information and briefly note other sources' views.\n"
+            "If the retrieved knowledge addresses the question's topic (even "
+            "partially), provide a grounded answer that cites the sources and "
+            "notes any limitations. Only route when the knowledge is clearly "
+            "off-topic relative to the question.\n"
             'Respond in JSON only: { "response_type": "answer"|"clarification"|"routing", '
             '"answer": string (REQUIRED — never null; for routing explain why you are routing), "grounded": boolean, '
             '"sources": [{"entry_id": string, "sme_name": string, "topic": string}], '

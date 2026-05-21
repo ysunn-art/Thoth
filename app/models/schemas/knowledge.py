@@ -40,6 +40,28 @@ class KnowledgeEntryResponse(BaseModel):
     usage: Optional[UsageInfo] = None
 
 
+class KnowledgeSynthesizeResponse(BaseModel):
+    entry_id: str
+    sme_id: str
+    topic: str
+    status: str
+    content: str
+    sources: Sources
+    created_at: str
+    usage: Optional[UsageInfo] = None
+
+
+class KnowledgeReadResponse(BaseModel):
+    entry_id: str
+    sme_id: str
+    topic: str
+    status: str
+    content: str
+    sources: Sources
+    created_at: str
+    updated_at: str
+
+
 class ApproveResponse(BaseModel):
     entry_id: str
     status: str
@@ -59,4 +81,4 @@ class RejectResponse(BaseModel):
 
 
 class KnowledgeListResponse(BaseModel):
-    entries: List[KnowledgeEntryResponse]
+    entries: List[KnowledgeReadResponse]
