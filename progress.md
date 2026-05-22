@@ -95,5 +95,5 @@ Migrated from Anthropic SDK + OpenAI embeddings to team's actual architecture:
 - **ARCHITECTURE.md** — ER diagram, tech stack justification, agentic design
 - **Demo script** — step-by-step walkthrough of all 8 capabilities
 - **Production recommendations** — 1-2 page doc for T-Mobile
-- **Closed-book test** — query before any data loaded, system should refuse cleanly
+- ~~**Closed-book test**~~ — ✅ implemented: empty DB returns `response_type: routing` with 0 tokens, no LLM call
 - **Persistence test** — load knowledge, restart server, knowledge must still be queryable

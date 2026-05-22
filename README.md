@@ -25,11 +25,44 @@ See [progress.md](progress.md) for implementation status and bug fixes.
 
 ## Changelog
 
+### 2026-05-22 — Query pipeline overhaul, schema fixes, observability
+
+**Query pipeline:**
+- **Unified classifier** (`query_service.py`): Replaced the old two-method (`_ask_or_route` + `_route_or_escalate`) chain with a single `_classify_and_route` that decides clarify / SME-route / admin-escalate in one Haiku call. Includes both `specialization` and `sub_areas` in SME context for better matching.
+- **Similarity-aware retrieval**: `top_k=8`, `RELEVANCE_THRESHOLD=0.45` filters noise. Fast-path skips LLM for `top_sim < 0.30`. Relevance score and SME name included in each knowledge chunk shown to the LLM.
+- **Closed-book defense**: When DB has no approved chunks, returns `response_type: routing` with 0 tokens (no LLM call made).
+- **Multi-SME routing**: System prompt explicitly instructs the LLM to surface ALL relevant SMEs when a question spans domains.
+- **Input sanitization** (`app/core/sanitize.py`): Questions are sanitized before embedding and prompting.
+- **Token accounting fix**: `_classify_and_route` now correctly accumulates tokens across both LLM calls when it falls through to routing.
+
+**Schema fixes (P0):**
+- `GET /smes/{id}/interviews` → `InterviewSummary` (no unused fields)
+- `GET /interviews/{id}` → `InterviewTranscript` with `List[TurnSummary]` (turns without usage)
+- `GET /smes/{id}/materials` → `MaterialSummary` (no sme_id, matches spec)
+- `POST .../synthesize` → `KnowledgeSynthesizeResponse` (with usage, no updated_at)
+- `GET/PUT /knowledge*` → `KnowledgeReadResponse` (with updated_at, no usage)
+
+**Observability & resilience:**
+- Request-ID middleware (`main.py`): every request logs method, path, status, duration; echoes `X-Request-ID` header.
+- LLM timeout: `AsyncOpenAI(timeout=30)` — hangs fail fast.
+- LLM call logging: `logger.info` after every `complete()` with model and token counts.
+- Silent `except: pass` replaced with `logger.error(..., exc_info=True)`.
+
+**Model routing:**
+- `_classify_and_route`: Haiku (cheap binary classifier)
+- `query()` happy path (knowledge-grounded answer): Sonnet
+
+**Dependency hygiene:**
+- `requirements.txt` now pins exact versions (fastapi, sqlalchemy, openai, sentence-transformers, etc.)
+- `.gitignore` updated to exclude `.DS_Store` and `.idea/`
+
+---
+
 ### 2026-05-02 — Performance improvements
 
-- **Parallel material loading** (`knowledge_service.py`): `synthesize()` now loads all material files concurrently via `asyncio.gather` + `asyncio.to_thread` instead of sequentially. DB reads remain sequential (SQLAlchemy `AsyncSession` constraint). Load failures log a warning and degrade gracefully rather than crashing.
-- **SME list cache** (`sme_repo.py`): `list_all()` caches results in a module-level variable, eliminating a full table scan on every `/query` request. Cache is invalidated on SME create and system purge.
-- **Bulk chunk insert** (`vector_repo.py`): `upsert_chunks()` now issues a single `execute(insert(...), rows)` instead of one `db.add()` per chunk — one DB round-trip regardless of chunk count.
+- **Parallel material loading** (`knowledge_service.py`): `synthesize()` now loads all material files concurrently via `asyncio.gather` + `asyncio.to_thread`. Load failures log a warning and degrade gracefully.
+- **SME list cache** (`sme_repo.py`): `list_all()` caches results in a module-level variable, eliminating a full table scan on every `/query` request. Invalidated on SME create and system purge.
+- **Bulk chunk insert** (`vector_repo.py`): `upsert_chunks()` issues a single `execute(insert(...), rows)` — one DB round-trip regardless of chunk count.
 
 Base URL: `http://localhost:8000/api/v1`
 Auth: `Authorization: Bearer <BENCHMARK_API_KEY>`
