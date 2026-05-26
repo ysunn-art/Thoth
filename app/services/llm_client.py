@@ -49,13 +49,17 @@ class LLMClient:
         messages: list,
         max_tokens: int = 2048,
         model: str = MODEL_SMART,
+        temperature: float | None = None,
     ) -> tuple[str, UsageInfo]:
         all_messages = ([{"role": "system", "content": system}] if system else []) + messages
-        response = await self._client.chat.completions.create(
-            model=model,
-            max_tokens=max_tokens,
-            messages=all_messages,
-        )
+        kwargs = {
+            "model": model,
+            "max_tokens": max_tokens,
+            "messages": all_messages,
+        }
+        if temperature is not None:
+            kwargs["temperature"] = temperature
+        response = await self._client.chat.completions.create(**kwargs)
         u = response.usage
         usage = UsageInfo(
             prompt_tokens=u.prompt_tokens,

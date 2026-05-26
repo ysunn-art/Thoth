@@ -25,7 +25,60 @@ See [progress.md](progress.md) for implementation status and bug fixes.
 
 ## Changelog
 
-### 2026-05-22 — Query pipeline overhaul, schema fixes, observability
+### 2026-05-26 — Query routing overhaul: guardrail, common-sense answering, risk filter
+
+**Deterministic relevance guardrail** (`query_service.py`):
+- After LLM responds, if `response_type != "answer"` but `max_sim >= 0.45` AND `>= 2` relevant chunks, a second "you MUST answer" LLM call overrides the LLM's routing/clarification decision.
+- Token counts from both calls are properly accumulated into `usage`.
+- This removes LLM non-determinism from the routing equation — strong retrieval signals force an answer regardless of LLM judgment variance.
+
+**Answer-first system prompt** (`query_service.py`):
+- Rewrote the main Q&A system prompt with strict priority hierarchy: **Answer → Clarify → Route**.
+- "ANSWERING IS THE DEFAULT" — the model must commit to an answer whenever any chunk is topically related.
+- Minor terminology mismatches (e.g. "jurisdictions" vs "restricted jurisdictions") no longer trigger unnecessary routing.
+
+**Model switch for classification consistency** (`query_service.py`):
+- `_classify_and_route` now uses `MODEL_SMART` (Sonnet) instead of `MODEL_FAST` (Haiku) at `temperature=0`.
+- Haiku was fast but non-deterministic for nuanced domain classification — same question could yield different routing decisions. Sonnet gives reproducible results.
+
+**Common-sense direct answering** (`query_service.py`):
+- Classifier now supports a third decision: `"answer"` for common-sense / general-knowledge questions.
+- When classifier says "answer", the system generates a direct answer (`grounded=false`) instead of routing.
+- Updated decision hierarchy: **answer (common sense) → clarify → route (domain-specific / admin)**.
+- Both "no SMEs" and "has SMEs" paths respect this new decision.
+- Fallback: if the classifier says "answer" but provides no answer text, a separate LLM call generates the answer.
+
+**Risk-aware routing** (`app/core/risk_filter.py` + `query_service.py`):
+- **Tier 1 (Critical)**: Self-harm / suicide / abuse patterns → immediate admin escalation BEFORE embedding. Zero tokens, zero LLM calls.
+- **Tier 2 (High-Risk)**: 10 deterministic categories (billing, account, privacy, legal, security, medical, financial, authorization, destructive, organizational) using action-oriented regex patterns. If triggered with no RAG chunks → admin escalation, no classification LLM needed.
+- **Option B**: High-risk questions WITH RAG chunks still receive grounded answers — SME-approved content is safe to surface even on sensitive topics.
+- Patterns are action-phrase-aware: "how do I get a refund" triggers, "what is a refund" passes through.
+- Updated classifier prompt includes risk categories as guidance for nuanced cases the pattern filter misses.
+
+**Risk categories defined:**
+
+| Category | Example trigger | Example non-trigger |
+|----------|----------------|---------------------|
+| billing | "how do I get a refund" | "what is a refund" |
+| account | "forgot my password" | "what is a password" |
+| privacy | "delete all my personal data" | "what is GDPR" |
+| legal | "can I sue the company" | "what is contract law" |
+| security | "bypass the firewall" | "what is a firewall" |
+| medical | "what medication should I take" | "what is ibuprofen" |
+| financial | "should I invest in Tesla" | "what is a stock" |
+| authz | "give me admin access" | "what is admin" |
+| destructive | "delete production database" | "what is a database" |
+| org | "how do I submit an expense report" | "what is an expense report" |
+| self_harm | "I want to kill myself" | — (always blocked) |
+
+**New files:**
+- `app/core/risk_filter.py` — `check_risk(question) → (is_risky: bool, category: str)` with 11 risk categories and action-oriented regex patterns.
+
+**Comprehensive benchmark tests** (`tests/services/test_query_service.py` — 28 tests total):
+- 11 original tests: guardrail overrides, consistency, classification fallbacks, session history.
+- 4 common-sense tests: answer directly with/without SMEs, domain→admin, domain→SME.
+- 13 risk-aware tests: every risk category tested, definition pass-through, RAG override (Option B), below-threshold path, Tier 1 pre-embedding block.
+- All 36 project tests pass (including 8 existing tests in other modules).
 
 **Query pipeline:**
 - **Unified classifier** (`query_service.py`): Replaced the old two-method (`_ask_or_route` + `_route_or_escalate`) chain with a single `_classify_and_route` that decides clarify / SME-route / admin-escalate in one Haiku call. Includes both `specialization` and `sub_areas` in SME context for better matching.

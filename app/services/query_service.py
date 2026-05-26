@@ -4,10 +4,11 @@ from datetime import datetime, timezone
 from app.repositories.sme_repo import SMERepository
 from app.repositories.knowledge_repo import KnowledgeRepository
 from app.repositories.vector_repo import VectorRepository
-from app.services.llm_client import llm_client, MODEL_FAST
+from app.services.llm_client import llm_client, MODEL_SMART
 from app.services.session_store import session_store
 from app.models.schemas.query import QueryResponse, SourceRef, RoutingTarget, UsageInfo as UsageSchema
 from app.core.sanitize import sanitize_input
+from app.core.risk_filter import check_risk
 
 logger = logging.getLogger(__name__)
 
@@ -50,9 +51,58 @@ class QueryService:
         smes = await self.sme_repo.list_all()
 
         if not smes:
+            check_system = (
+                "Determine if this question is common-sense/general-knowledge or "
+                "requires specialized domain expertise. "
+                'Output JSON: {"decision": "answer"|"route", "answer": null|string}'
+            )
+            check_text, check_usage = await llm_client.complete(
+                system=check_system,
+                messages=[{"role": "user", "content": question}],
+                max_tokens=128,
+                model=MODEL_SMART,
+                temperature=0,
+            )
+            try:
+                check_parsed = json.loads(check_text)
+            except json.JSONDecodeError:
+                check_parsed = {}
+
+            if check_parsed.get("decision") == "answer":
+                answer_text = check_parsed.get("answer") or ""
+                if not answer_text:
+                    answer_text = question
+                session_store.append(session_id, "user", question)
+                session_store.append(session_id, "assistant", answer_text)
+                return QueryResponse(
+                    answer=answer_text,
+                    grounded=False,
+                    sources=[],
+                    disclaimer=None,
+                    session_id=session_id,
+                    response_type="answer",
+                    routed_to=None,
+                    timestamp=datetime.now(timezone.utc).isoformat(),
+                    usage=UsageSchema(
+                        prompt_tokens=check_usage.prompt_tokens,
+                        completion_tokens=check_usage.completion_tokens,
+                        total_tokens=check_usage.total_tokens,
+                        model=check_usage.model,
+                    ),
+                )
+
             session_store.append(session_id, "user", question)
             session_store.append(session_id, "assistant", _ADMIN_REFUSAL)
-            return self._build_admin_escalation(session_id, "No SMEs are registered in the system.")
+            return self._build_admin_escalation(
+                session_id,
+                "No SMEs are registered and this question requires domain expertise.",
+                UsageSchema(
+                    prompt_tokens=check_usage.prompt_tokens,
+                    completion_tokens=check_usage.completion_tokens,
+                    total_tokens=check_usage.total_tokens,
+                    model=check_usage.model,
+                ),
+            )
 
         sme_context = "\n".join(
             f"- {s.name}: specialization={s.specialization}, sub_areas=[{', '.join(s.sub_areas)}]"
@@ -60,17 +110,36 @@ class QueryService:
         )
 
         system = (
-            "Classify this user question against available SME domains. "
-            "Use BOTH specialization and sub_areas for matching. "
-            "Output JSON only:\n"
-            '{"decision": "clarify"|"route", "clarifying_question": null|string, '
+            "You are a strict domain classifier. First, determine whether this question "
+            "requires specialized SME domain knowledge or is common-sense/general knowledge. "
+            'Output exactly this JSON structure:\n'
+            '{"decision": "answer"|"clarify"|"route", "answer": null|string, '
+            '"clarifying_question": null|string, '
             '"routed_to": [{"sme_name": string, "reason": string}]}\n\n'
-            "Rules:\n"
-            '- "clarify": question is too vague AND could apply to ≥2 domains → ask which one\n'
-            '- "route": question is clear but outside all domains → empty routed_to\n'
-            '- "route": question matches a domain but lacks knowledge → populate routed_to with matching SMEs\n'
-            "- Only route to SMEs whose listed expertise (specialization OR sub_areas) directly covers the question topic.\n"
-            "- Be strict: if no domain matches, use empty routed_to."
+            "DECISION RULES — follow in priority order:\n"
+            '1. "answer": question is common-sense, general knowledge, trivia, basic math, '
+            "definitions, translations, well-known facts — anything a generally knowledgeable "
+            "person can answer without specialist training. Provide a short direct answer "
+            "in the 'answer' field.\n"
+            '2. "clarify": question is genuinely ambiguous AND could reasonably refer to '
+            "≥2 different SME domains. Provide a specific follow-up question.\n"
+            '3. "route": question clearly requires specialized SME domain knowledge. '
+            "Populate routed_to with matching SMEs (use empty routed_to if no SME matches).\n\n"
+            "HIGH-RISK TOPICS — if the question involves ANY of these, use decision='route' "
+            "with empty routed_to (escalate to administrator):\n"
+            "- billing / payments (refunds, cancellations, charges, pricing)\n"
+            "- account access (passwords, login issues, account changes, 2FA)\n"
+            "- personal data / privacy (data deletion, access requests, GDPR/CCPA)\n"
+            "- legal matters (legal advice, lawsuits, compliance violations)\n"
+            "- security exploits (bypassing controls, vulnerabilities, admin passwords)\n"
+            "- medical advice (diagnosis, medication, symptoms, treatment)\n"
+            "- financial advice (investments, tax advice, retirement planning)\n"
+            "- authorization requests (asking for elevated access or permissions)\n"
+            "- destructive operations (deleting databases, shutting down servers)\n"
+            "- organizational procedures (expense reports, HR policies, internal contacts)\n\n"
+            "IMPORTANT: Default to 'answer' for any question that does NOT clearly require "
+            "specialist domain expertise AND is not a high-risk topic. Only route when the "
+            "question specifically demands subject-matter knowledge from one of the listed SMEs."
         )
         user_msg = f"Question: {question}\n\nAvailable SMEs:\n{sme_context}"
 
@@ -78,7 +147,8 @@ class QueryService:
             system=system,
             messages=[{"role": "user", "content": user_msg}],
             max_tokens=512,
-            model=MODEL_FAST,
+            model=MODEL_SMART,
+            temperature=0,
         )
 
         try:
@@ -98,6 +168,41 @@ class QueryService:
             total_tokens=usage.total_tokens,
             model=usage.model,
         )
+
+        if decision == "answer":
+            answer_text = parsed.get("answer") or parsed.get("clarifying_question") or ""
+            if not answer_text:
+                answer_system = "Answer this question concisely in 1-3 sentences."
+                fallback_text, fallback_usage = await llm_client.complete(
+                    system=answer_system,
+                    messages=[{"role": "user", "content": question}],
+                    max_tokens=256,
+                    model=MODEL_SMART,
+                    temperature=0,
+                )
+                answer_text = fallback_text.strip()
+                usage.prompt_tokens += fallback_usage.prompt_tokens
+                usage.completion_tokens += fallback_usage.completion_tokens
+                usage.total_tokens += fallback_usage.total_tokens
+
+            session_store.append(session_id, "user", question)
+            session_store.append(session_id, "assistant", answer_text)
+            return QueryResponse(
+                answer=answer_text,
+                grounded=False,
+                sources=[],
+                disclaimer=None,
+                session_id=session_id,
+                response_type="answer",
+                routed_to=None,
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                usage=UsageSchema(
+                    prompt_tokens=usage.prompt_tokens,
+                    completion_tokens=usage.completion_tokens,
+                    total_tokens=usage.total_tokens,
+                    model=usage.model,
+                ),
+            )
 
         if decision == "clarify" and clarifying_q:
             session_store.append(session_id, "user", question)
@@ -163,13 +268,27 @@ class QueryService:
 
     async def query(self, question: str, session_id: str) -> QueryResponse:
         question = sanitize_input(question)
+
+        is_risky, risk_category = check_risk(question)
+        if is_risky and risk_category == "self_harm":
+            session_store.append(session_id, "user", question)
+            session_store.append(session_id, "assistant", _ADMIN_REFUSAL)
+            return self._build_admin_escalation(session_id, "Question requires administrator review.")
+
         query_embedding = await llm_client.embed_one(question)
         chunks = await self.vector_repo.search(query_embedding, top_k=8)
 
         if not chunks:
+            if is_risky:
+                session_store.append(session_id, "user", question)
+                session_store.append(session_id, "assistant", _ADMIN_REFUSAL)
+                return self._build_admin_escalation(
+                    session_id,
+                    f"High-risk question ({risk_category}) — requires administrator review.",
+                )
             return await self._classify_and_route(question, session_id)
 
-        RELEVANCE_THRESHOLD = 0.45
+        RELEVANCE_THRESHOLD = 0.35
         relevant_chunks = [(c, e, s) for c, e, s in chunks if s >= RELEVANCE_THRESHOLD]
 
         print(f"[RETRIEVAL] total={len(chunks)} above_threshold={len(relevant_chunks)}", flush=True)
@@ -177,9 +296,13 @@ class QueryService:
             print(f"  sim={s:.3f} entry={e.id} sme_id={e.sme_id} topic={e.topic[:40]!r}", flush=True)
 
         if not relevant_chunks:
-            top_sim = chunks[0][2] if chunks else 0.0
-            if top_sim < 0.30:
-                return await self._classify_and_route(question, session_id)
+            if is_risky:
+                session_store.append(session_id, "user", question)
+                session_store.append(session_id, "assistant", _ADMIN_REFUSAL)
+                return self._build_admin_escalation(
+                    session_id,
+                    f"High-risk question ({risk_category}) — requires administrator review.",
+                )
             return await self._classify_and_route(question, session_id)
 
         smes = await self.sme_repo.list_all()
@@ -197,6 +320,10 @@ class QueryService:
                 f"{chunk.chunk_text}\n\n"
             )
 
+        max_sim = max(s for _, _, s in relevant_chunks)
+        num_relevant = len(relevant_chunks)
+        logger.info("retrieval_quality max_sim=%.3f num_relevant=%d", max_sim, num_relevant)
+
         history = session_store.get_history(session_id)
         history_text = ""
         if history:
@@ -206,41 +333,47 @@ class QueryService:
 
         system = (
             "You are a knowledge base assistant. Answer questions using ONLY the provided knowledge entries. "
-            "PRIMARY DIRECTIVE: When retrieved knowledge contains the answer, "
-            "provide a grounded answer with citations. Do not refuse to answer "
-            "because of minor terminology mismatches between the question and "
-            "the source (e.g., the question says 'Tier-1 jurisdictions' and the "
-            "source says 'Tier-1 restricted jurisdictions' — these refer to the "
-            "same thing). "
-            "Use clarification ONLY when the question is genuinely ambiguous "
-            "between two or more topics in the knowledge base. Do not use "
-            "clarification as a hedge when you are uncertain — commit to a "
-            "grounded answer with appropriate caveats instead. "
-            "When the retrieved knowledge comes from multiple SMEs whose expertise "
-            "is complementary on the question, synthesize an answer that draws from "
-            "ALL relevant sources and cite every contributing source in the sources array. "
-            "Only route to SMEs (response_type='routing') when the knowledge is insufficient "
-            "to answer — not simply because multiple SMEs are involved. "
-            "Each entry has a Relevance score (0-1). If the top entry's Relevance is "
-            "below 0.65, prefer clarification or routing over answering directly. "
-            "If the answer is not in the knowledge entries, route to ALL appropriate SMEs — "
-            "there may be multiple relevant specialists, surface all of them. "
-            "When no clear SME match exists, escalate to an administrator. "
-            "Keep answers concise but complete — 2 to 4 paragraphs. Avoid repeating information verbatim from the sources. "
-            "GROUNDED ANSWER REQUIREMENTS (response_type='answer'):\n"
-            "- Cite ALL source entry_ids that contributed information to the answer\n"
-            "- Include a 1-sentence paraphrase or quote from the knowledge that supports your answer\n"
-            '- ALWAYS set disclaimer to "This information is based on approved SME knowledge and may not constitute professional advice."\n'
-            "- If sources differ in details, present the most directly relevant source's information and briefly note other sources' views.\n"
-            "If the retrieved knowledge addresses the question's topic (even "
-            "partially), provide a grounded answer that cites the sources and "
-            "notes any limitations. Only route when the knowledge is clearly "
-            "off-topic relative to the question.\n"
-            'Respond in JSON only: { "response_type": "answer"|"clarification"|"routing", '
-            '"answer": string (REQUIRED — never null; for routing explain why you are routing), "grounded": boolean, '
+
+            "ANSWERING IS THE DEFAULT — you MUST answer whenever the retrieved knowledge relates to "
+            "the question's subject matter, even if only partially or tangentially. "
+
+            "DECISION HIERARCHY — apply in strict priority order:\n"
+            "1. ANSWER (response_type='answer'): Use this when ANY retrieved knowledge chunk "
+            "is topically related to the question. Minor terminology differences (e.g. "
+            "'jurisdictions' vs 'restricted jurisdictions') do NOT justify routing. "
+            "When in doubt, ANSWER. Cite all sources that contributed. Set grounded=true. "
+            "Even partial matches warrant a grounded answer that notes limitations.\n"
+            "2. CLARIFY (response_type='clarification'): Use ONLY when the question could "
+            "reasonably refer to ≥2 distinct knowledge topics AND both have supporting "
+            "chunks in the retrieved set. Do NOT clarify when you are simply uncertain — "
+            "answer with caveats instead.\n"
+            "3. ROUTE (response_type='routing'): Use ONLY when ALL retrieved knowledge "
+            "chunks are clearly off-topic relative to the question. If any chunk discusses "
+            "the same general subject as the question, you MUST answer (rule 1).\n\n"
+
+            "SYNTHESIS RULES:\n"
+            "- Draw from MULTIPLE complementary sources when available — cite ALL contributing entries\n"
+            "- Keep answers concise but complete: 2–4 paragraphs\n"
+            "- Do not repeat information verbatim from chunks — synthesize and paraphrase\n"
+            "- If sources disagree, present the most directly relevant view and briefly note alternatives\n\n"
+
+            "ROUTING RULES (only when genuinely off-topic):\n"
+            "- Route to ALL SMEs whose specialization or sub_areas match the question\n"
+            "- If no SME matches, escalate to administrator\n\n"
+
+            "JSON FORMAT — output ONLY valid JSON, no preamble:\n"
+            '{"response_type": "answer"|"clarification"|"routing", '
+            '"answer": string (REQUIRED for all types), "grounded": boolean, '
             '"sources": [{"entry_id": string, "sme_name": string, "topic": string}], '
             '"routed_to": [{"type": "sme"|"admin", "sme_name": string|null, "specialization": string, "reason": string}]|null, '
-            '"disclaimer": string|null }'
+            '"disclaimer": string|null}\n\n'
+
+            "FOR answer type:\n"
+            "- grounded: true\n"
+            "- sources: list ALL entry_ids whose content contributed to the answer\n"
+            '- disclaimer: "This information is based on approved SME knowledge and may not constitute professional advice."\n'
+            "FOR clarification type: grounded=false, sources=[], routed_to=null\n"
+            "FOR routing type: grounded=false, sources=[], populate routed_to"
         )
 
         user_msg = (
@@ -253,6 +386,7 @@ class QueryService:
         response_text, usage = await llm_client.complete(
             system=system,
             messages=[{"role": "user", "content": user_msg}],
+            temperature=0,
         )
 
         try:
@@ -263,6 +397,49 @@ class QueryService:
             parsed = json.loads(response_text[start:end]) if start != -1 else {}
 
         answer = parsed.get("answer") or response_text
+        response_type = parsed.get("response_type", "answer")
+
+        GUARD_MAX_SIM = 0.45
+        GUARD_MIN_CHUNKS = 2
+
+        if response_type != "answer" and max_sim >= GUARD_MAX_SIM and num_relevant >= GUARD_MIN_CHUNKS:
+            logger.warning(
+                "retrieval_guard_triggered type=%s max_sim=%.3f num_chunks=%d question=%s",
+                response_type, max_sim, num_relevant, question[:80],
+            )
+            force_system = (
+                "You are a knowledge base assistant. You MUST answer the user's question "
+                "using the provided knowledge chunks. The chunks ARE relevant to the question. "
+                "Synthesize a complete, grounded answer that cites all contributing sources. "
+                "Output JSON only:\n"
+                '{"answer": string, "sources": [{"entry_id": string, "sme_name": string, "topic": string}]}'
+            )
+            retry_text, retry_usage = await llm_client.complete(
+                system=force_system,
+                messages=[{"role": "user", "content": user_msg}],
+                model=MODEL_SMART,
+                temperature=0,
+            )
+            usage.prompt_tokens += retry_usage.prompt_tokens
+            usage.completion_tokens += retry_usage.completion_tokens
+            usage.total_tokens += retry_usage.total_tokens
+
+            try:
+                retry_parsed = json.loads(retry_text)
+            except json.JSONDecodeError:
+                start = retry_text.find("{")
+                end = retry_text.rfind("}") + 1
+                retry_parsed = json.loads(retry_text[start:end]) if start != -1 else {}
+
+            answer = retry_parsed.get("answer") or answer
+            response_type = "answer"
+            parsed["grounded"] = True
+            parsed["sources"] = retry_parsed.get("sources", [])
+            parsed["disclaimer"] = (
+                "This information is based on approved SME knowledge "
+                "and may not constitute professional advice."
+            )
+            parsed["routed_to"] = None
 
         session_store.append(session_id, "user", question)
         session_store.append(session_id, "assistant", answer)
@@ -277,7 +454,7 @@ class QueryService:
             sources=sources,
             disclaimer=parsed.get("disclaimer"),
             session_id=session_id,
-            response_type=parsed.get("response_type", "answer"),
+            response_type=response_type,
             routed_to=routed_to,
             timestamp=datetime.now(timezone.utc).isoformat(),
             usage=UsageSchema(
