@@ -334,22 +334,27 @@ class QueryService:
         system = (
             "You are a knowledge base assistant. Answer questions using ONLY the provided knowledge entries. "
 
-            "ANSWERING IS THE DEFAULT — you MUST answer whenever the retrieved knowledge relates to "
-            "the question's subject matter, even if only partially or tangentially. "
+            "ANSWERING IS THE DEFAULT when retrieval quality is strong (≥3 relevant chunks "
+            "or max similarity ≥0.50). When retrieval quality is WEAK (≤2 chunks or "
+            "max similarity <0.50), be more cautious — prefer clarification for vague "
+            "or ambiguous questions instead of forcing an answer from sparse evidence. "
 
             "DECISION HIERARCHY — apply in strict priority order:\n"
-            "1. ANSWER (response_type='answer'): Use this when ANY retrieved knowledge chunk "
-            "is topically related to the question. Minor terminology differences (e.g. "
-            "'jurisdictions' vs 'restricted jurisdictions') do NOT justify routing. "
-            "When in doubt, ANSWER. Cite all sources that contributed. Set grounded=true. "
-            "Even partial matches warrant a grounded answer that notes limitations.\n"
-            "2. CLARIFY (response_type='clarification'): Use ONLY when the question could "
-            "reasonably refer to ≥2 distinct knowledge topics AND both have supporting "
-            "chunks in the retrieved set. Do NOT clarify when you are simply uncertain — "
-            "answer with caveats instead.\n"
+            "1. ANSWER (response_type='answer'): Use when knowledge chunks are clearly "
+            "topically related AND retrieval quality is adequate. If only 1-2 marginal "
+            "chunks exist (similarity <0.50), consider whether clarification or routing "
+            "would better serve the user. Do NOT force an answer from a single weak match "
+            "when the question could plausibly refer to other missing topics. Cite all "
+            "contributing sources. Set grounded=true.\n"
+            "2. CLARIFY (response_type='clarification'): Use when the question is vague "
+            "or could refer to ≥2 distinct knowledge topics. Also use when retrieval "
+            "quality is weak (few chunks, low similarity) AND the question is ambiguous "
+            "enough that another interpretation could yield a very different answer. "
+            "Ask a specific follow-up question that narrows the intent.\n"
             "3. ROUTE (response_type='routing'): Use ONLY when ALL retrieved knowledge "
-            "chunks are clearly off-topic relative to the question. If any chunk discusses "
-            "the same general subject as the question, you MUST answer (rule 1).\n\n"
+            "chunks are genuinely off-topic — not simply sparse or low-similarity. "
+            "If any chunk discusses the same general subject as the question, prefer "
+            "clarification (rule 2) over routing.\n\n"
 
             "SYNTHESIS RULES:\n"
             "- Draw from MULTIPLE complementary sources when available — cite ALL contributing entries\n"
@@ -376,7 +381,15 @@ class QueryService:
             "FOR routing type: grounded=false, sources=[], populate routed_to"
         )
 
+        quality_label = "WEAK"
+        if max_sim >= 0.50 and num_relevant >= 3:
+            quality_label = "STRONG"
+        elif max_sim >= 0.40 and num_relevant >= 2:
+            quality_label = "MODERATE"
+
         user_msg = (
+            f"Retrieval quality: {num_relevant} chunk(s), max similarity {max_sim:.2f} — {quality_label} match. "
+            f"{'Prefer clarification over forced answers from sparse evidence.' if quality_label == 'WEAK' else ''}\n\n"
             f"{history_text}"
             f"Question: {question}\n\n"
             f"Relevant knowledge:\n{knowledge_context or '(none)'}\n\n"
