@@ -93,13 +93,30 @@ RAG working: `grounded: true`, answers sourced from uploaded PDF content.
 - **Root cause**: No risk classification existed anywhere in the pipeline. Billing, account access, privacy, legal, security, medical, financial, authorization, destructive, and organizational questions could be answered by the LLM or routed to SMEs without admin review.
 - **Fix**: Created `app/core/risk_filter.py` — deterministic pre-filter with 11 risk categories using action-oriented regex patterns. Tier 1 (self-harm) blocks before embedding. Tier 2 (10 high-risk categories) blocks before LLM classification when RAG has no chunks. High-risk WITH RAG chunks still receive grounded answers from SME-approved content (Option B).
 
+**Bug 5 — Weak retrieval caused forced answers instead of clarification:**
+- **Root cause**: System prompt had absolute "ANSWERING IS THE DEFAULT" rule. With only 1 chunk at sim=0.427 and a vague question, the LLM followed the directive and answered instead of clarifying.
+- **Fix (attempt 1)**: Added retrieval quality summary to user message (STRONG/MODERATE/WEAK) and updated system prompt with conditional rules. But the complex prompt with too many conditions (answer-when-strong / clarify-when-weak / route-when-off-topic) confused the LLM.
+
+**Bug 6 — LLM returned empty responses (completion_tokens=1) with complex prompt:**
+- **Root cause**: The verbose system prompt with contradictory retrieval-quality-conditional rules caused the LLM to refuse/fail, returning 1 token of empty content → `json.loads(None)` → 500 TypeError.
+- **Fix — None protection**: Added `if not response_text` checks across all 5 LLM call sites (main query, `_classify_and_route`, no-SME classification, answer fallback, guardrail retry). Empty responses now log `llm_empty_response` and safely escalate to admin instead of crashing.
+- **Fix — Deterministic weak-retrieval guardrail**: Moved the clarify-vs-answer decision OUT of the LLM and into Python code. Quality labels computed deterministically:
+  - `STRONG` — `max_sim >= 0.60` OR (`max_sim >= 0.50 AND >= 3 chunks`) → normal RAG answer
+  - `MODERATE` — `max_sim >= 0.40 AND >= 2 chunks` → normal RAG answer
+  - `WEAK` — everything else → force LLM to generate a clarifying question with a simple prompt
+  - Simplified RAG system prompt to only handle `answer` / `routing` decisions. No more contradictory conditional rules.
+- **Decision tree logging**: Added `[DECISION]` tagged `print()` lines at every branching point (risk_check, tier1, tier2, vector_search, rag_quality, weak_guard, rag_llm, guardrail, final) for real-time debugging in terminal output.
+
 ---
 
 ## Architecture changes (2026-05-26)
 
 ### Query routing overhaul
 - **Deterministic relevance guardrail** (`query_service.py`): When retrieval quality is objectively high, bypasses LLM routing/clarification decisions and forces a grounded answer. Token counts properly accumulated across both calls.
-- **Answer-first system prompt**: `query()` main Q&A prompt rewritten with "ANSWERING IS THE DEFAULT" and strict hierarchy: Answer → Clarify → Route. Includes explicit rules for terminology mismatches and multi-SME synthesis.
+- **Deterministic weak-retrieval guardrail** (`query_service.py`): When retrieval quality is WEAK (max_sim < 0.40 or < 2 chunks), forces the LLM to generate a clarifying question with a simple prompt — no complex decision rules. Quality thresholds: STRONG (sim>=0.60, or sim>=0.50+3 chunks), MODERATE (sim>=0.40+2 chunks), WEAK (everything else).
+- **Simplified RAG system prompt**: Removed contradictory conditional rules. Prompt now only handles answer/routing decisions. Clarification is handled deterministically before the LLM is called.
+- **None-protection across all LLM call sites**: Empty LLM responses (`completion_tokens=1`) are caught at 5 code paths and safely escalated to admin instead of crashing with `json.loads(None)` → 500.
+- **Decision tree logging**: `[DECISION]` tagged print statements at every branching point for real-time debugging.
 - **Model switch**: `_classify_and_route` now uses `MODEL_SMART` (Sonnet) instead of `MODEL_FAST` (Haiku) for reproducible classification.
 - **Common-sense answering**: Classifier now supports `"answer"` decision alongside `"clarify"` and `"route"`. Fallback LLM call generates answer text if classifier provides none.
 - **Risk-aware routing** (`app/core/risk_filter.py` + `query_service.py`): Two-tier deterministic pre-filter catches 11 risk categories before LLM classification. Self-harm → Tier 1 (before embedding). 10 high-risk categories → Tier 2 (after embedding, before classification).
@@ -107,7 +124,7 @@ RAG working: `grounded: true`, answers sourced from uploaded PDF content.
 
 ### New files
 - `app/core/risk_filter.py` — `check_risk(question) → (is_risky, category)` with 11 risk categories
-- `tests/services/test_query_service.py` — 28 tests covering guardrail, classification, risk filter (all 11 categories), RAG override (Option B), pass-through, and regression scenarios
+- `tests/services/test_query_service.py` — 28 tests covering guardrail, classification, weak-retrieval, risk filter (all 11 categories), RAG override (Option B), pass-through, and regression scenarios
 
 ---
 
