@@ -49,8 +49,10 @@ class QueryService:
 
     async def _classify_and_route(self, question: str, session_id: str) -> QueryResponse:
         smes = await self.sme_repo.list_all()
+        print(f"[DECISION] classify_enter: num_smes={len(smes)}", flush=True)
 
         if not smes:
+            print(f"[DECISION] classify_no_smes: checking common_sense...", flush=True)
             check_system = (
                 "Determine if this question is common-sense/general-knowledge or "
                 "requires specialized domain expertise. "
@@ -70,6 +72,7 @@ class QueryService:
                 check_parsed = {}
 
             if check_parsed.get("decision") == "answer":
+                print(f"[DECISION] classify_no_smes: LLM decided 'answer' → common sense answer", flush=True)
                 answer_text = check_parsed.get("answer") or ""
                 if not answer_text:
                     answer_text = question
@@ -177,6 +180,8 @@ class QueryService:
         decision = parsed.get("decision", "route")
         clarifying_q = parsed.get("clarifying_question")
         routed_raw = parsed.get("routed_to") or []
+        print(f"[DECISION] classify_has_smes: LLM raw decision={decision} clarify_q={bool(clarifying_q)} "
+              f"num_routed={len(routed_raw)}", flush=True)
 
         usage_schema = UsageSchema(
             prompt_tokens=usage.prompt_tokens,
@@ -186,6 +191,7 @@ class QueryService:
         )
 
         if decision == "answer":
+            print(f"[DECISION] classify_has_smes: LLM decided 'answer' → common sense answer", flush=True)
             answer_text = parsed.get("answer") or parsed.get("clarifying_question") or ""
             if not answer_text:
                 answer_system = "Answer this question concisely in 1-3 sentences."
@@ -222,6 +228,7 @@ class QueryService:
             )
 
         if decision == "clarify" and clarifying_q:
+            print(f"[DECISION] classify_has_smes: LLM decided 'clarify' → clarification", flush=True)
             session_store.append(session_id, "user", question)
             session_store.append(session_id, "assistant", clarifying_q)
             return QueryResponse(
@@ -239,6 +246,7 @@ class QueryService:
         session_store.append(session_id, "user", question)
 
         if not routed_raw:
+            print(f"[DECISION] classify_has_smes: LLM decided 'route' with empty routed_to → admin escalation", flush=True)
             session_store.append(session_id, "assistant", _ADMIN_REFUSAL)
             return self._build_admin_escalation(
                 session_id,
@@ -246,6 +254,7 @@ class QueryService:
                 usage_schema,
             )
 
+        print(f"[DECISION] classify_has_smes: LLM decided 'route' → routing to {len(routed_raw)} SME(s)", flush=True)
         sme_map = {s.name: s for s in smes}
         routed_to = []
         for r in routed_raw:
@@ -285,24 +294,31 @@ class QueryService:
 
     async def query(self, question: str, session_id: str) -> QueryResponse:
         question = sanitize_input(question)
+        print(f"[DECISION] entry: question={question[:60]!r}", flush=True)
 
         is_risky, risk_category = check_risk(question)
+        print(f"[DECISION] risk_check: is_risky={is_risky} category={risk_category or 'none'}", flush=True)
+
         if is_risky and risk_category == "self_harm":
+            print(f"[DECISION] tier1_self_harm: BLOCKED → admin escalation (no embedding)", flush=True)
             session_store.append(session_id, "user", question)
             session_store.append(session_id, "assistant", _ADMIN_REFUSAL)
             return self._build_admin_escalation(session_id, "Question requires administrator review.")
 
         query_embedding = await llm_client.embed_one(question)
         chunks = await self.vector_repo.search(query_embedding, top_k=8)
+        print(f"[DECISION] vector_search: total_chunks={len(chunks)}", flush=True)
 
         if not chunks:
             if is_risky:
+                print(f"[DECISION] tier2_no_chunks: is_risky=True ({risk_category}) → admin escalation", flush=True)
                 session_store.append(session_id, "user", question)
                 session_store.append(session_id, "assistant", _ADMIN_REFUSAL)
                 return self._build_admin_escalation(
                     session_id,
                     f"High-risk question ({risk_category}) — requires administrator review.",
                 )
+            print(f"[DECISION] tier2_no_chunks: safe → _classify_and_route", flush=True)
             return await self._classify_and_route(question, session_id)
 
         RELEVANCE_THRESHOLD = 0.35
@@ -314,12 +330,14 @@ class QueryService:
 
         if not relevant_chunks:
             if is_risky:
+                print(f"[DECISION] tier2_below_threshold: is_risky=True ({risk_category}) → admin escalation", flush=True)
                 session_store.append(session_id, "user", question)
                 session_store.append(session_id, "assistant", _ADMIN_REFUSAL)
                 return self._build_admin_escalation(
                     session_id,
                     f"High-risk question ({risk_category}) — requires administrator review.",
                 )
+            print(f"[DECISION] tier2_below_threshold: safe → _classify_and_route", flush=True)
             return await self._classify_and_route(question, session_id)
 
         smes = await self.sme_repo.list_all()
@@ -404,6 +422,8 @@ class QueryService:
         elif max_sim >= 0.40 and num_relevant >= 2:
             quality_label = "MODERATE"
 
+        print(f"[DECISION] rag_quality: max_sim={max_sim:.3f} num_relevant={num_relevant} label={quality_label}", flush=True)
+
         user_msg = (
             f"Retrieval quality: {num_relevant} chunk(s), max similarity {max_sim:.2f} — {quality_label} match. "
             f"{'Prefer clarification over forced answers from sparse evidence.' if quality_label == 'WEAK' else ''}\n\n"
@@ -445,10 +465,15 @@ class QueryService:
         answer = parsed.get("answer") or response_text
         response_type = parsed.get("response_type", "answer")
 
+        print(f"[DECISION] rag_llm: response_type={response_type} grounded={parsed.get('grounded', False)} "
+              f"num_sources={len(parsed.get('sources') or [])}", flush=True)
+
         GUARD_MAX_SIM = 0.45
         GUARD_MIN_CHUNKS = 2
 
         if response_type != "answer" and max_sim >= GUARD_MAX_SIM and num_relevant >= GUARD_MIN_CHUNKS:
+            print(f"[DECISION] guardrail: FIRED (type={response_type}, but max_sim={max_sim:.3f}>={GUARD_MAX_SIM}, "
+                  f"num={num_relevant}>={GUARD_MIN_CHUNKS}) → force retry for answer", flush=True)
             logger.warning(
                 "retrieval_guard_triggered type=%s max_sim=%.3f num_chunks=%d question=%s",
                 response_type, max_sim, num_relevant, question[:80],
@@ -489,6 +514,10 @@ class QueryService:
                     "and may not constitute professional advice."
                 )
                 parsed["routed_to"] = None
+        else:
+            if response_type != "answer":
+                print(f"[DECISION] guardrail: skipped (max_sim={max_sim:.3f} need>={GUARD_MAX_SIM}, "
+                      f"num={num_relevant} need>={GUARD_MIN_CHUNKS})", flush=True)
 
         session_store.append(session_id, "user", question)
         session_store.append(session_id, "assistant", answer)
@@ -496,6 +525,10 @@ class QueryService:
         sources = [SourceRef(**s) for s in (parsed.get("sources") or [])]
         routed_to_raw = parsed.get("routed_to")
         routed_to = [RoutingTarget(**r) for r in routed_to_raw] if routed_to_raw else None
+
+        routed_target = (routed_to[0].type if routed_to else "none") if routed_to else "none"
+        print(f"[DECISION] final: response_type={response_type} grounded={parsed.get('grounded', False)} "
+              f"routed_to={routed_target} sources={len(sources)}", flush=True)
 
         return QueryResponse(
             answer=answer,
