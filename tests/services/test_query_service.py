@@ -167,13 +167,13 @@ async def test_guardrail_overrides_clarification_when_quality_high():
 
 
 # ---------------------------------------------------------------------------
-# 3 — Guardrail: does NOT fire when quality is below threshold
+# 3 — Weak retrieval forces clarification instead of routing
 # ---------------------------------------------------------------------------
 @pytest.mark.asyncio
 async def test_guardrail_does_not_trigger_on_low_similarity():
     """
-    max_sim < 0.45 → guardrail stays silent. LLM's routing decision stands.
-    Only one LLM call is made.
+    max_sim < 0.40 triggers WEAK quality → deterministic clarification,
+    not routing (weak-retrieval guard fires before the LLM is called).
     """
     vector_repo = AsyncMock()
     vector_repo.search.return_value = [
@@ -189,23 +189,17 @@ async def test_guardrail_does_not_trigger_on_low_similarity():
     with patch("app.services.query_service.llm_client") as mock_llm:
         mock_llm.embed_one = AsyncMock(return_value=[0.1] * 384)
         mock_llm.complete = AsyncMock(return_value=(
-            '{"response_type": "routing", "answer": "no knowledge to answer this", '
-            '"grounded": false, "sources": [], '
-            '"routed_to": [{"type": "sme", "sme_name": "Bob", '
-            '"specialization": "Cybersecurity", "reason": "domain match"}], '
-            '"disclaimer": null}',
-            _usage(100, 40),
+            "Are you asking about network-level security or application security?",
+            _usage(40, 15),
         ))
 
         service = _make_service(sme_repo=sme_repo, vector_repo=vector_repo)
         result = await service.query("How do I secure my network?", "sess-3")
 
-    assert result.response_type == "routing"
+    assert result.response_type == "clarification"
     assert result.grounded is False
-    assert result.routed_to is not None
-
-    # Only one LLM call — guardrail did not fire
-    assert mock_llm.complete.call_count == 1
+    assert result.routed_to is None
+    mock_llm.complete.assert_called_once()
 
 
 # ---------------------------------------------------------------------------

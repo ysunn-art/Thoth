@@ -367,66 +367,93 @@ class QueryService:
             ) + "\n\n"
 
         system = (
-            "You are a knowledge base assistant. Answer questions using ONLY the provided knowledge entries. "
+            "You are a knowledge base assistant. Answer the user's question using "
+            "the provided knowledge entries. Synthesize information from multiple "
+            "sources when available. Use ONLY the provided knowledge. "
 
-            "ANSWERING IS THE DEFAULT when retrieval quality is strong (≥3 relevant chunks "
-            "or max similarity ≥0.50). When retrieval quality is WEAK (≤2 chunks or "
-            "max similarity <0.50), be more cautious — prefer clarification for vague "
-            "or ambiguous questions instead of forcing an answer from sparse evidence. "
-
-            "DECISION HIERARCHY — apply in strict priority order:\n"
-            "1. ANSWER (response_type='answer'): Use when knowledge chunks are clearly "
-            "topically related AND retrieval quality is adequate. If only 1-2 marginal "
-            "chunks exist (similarity <0.50), consider whether clarification or routing "
-            "would better serve the user. Do NOT force an answer from a single weak match "
-            "when the question could plausibly refer to other missing topics. Cite all "
-            "contributing sources. Set grounded=true.\n"
-            "2. CLARIFY (response_type='clarification'): Use when the question is vague "
-            "or could refer to ≥2 distinct knowledge topics. Also use when retrieval "
-            "quality is weak (few chunks, low similarity) AND the question is ambiguous "
-            "enough that another interpretation could yield a very different answer. "
-            "Ask a specific follow-up question that narrows the intent.\n"
-            "3. ROUTE (response_type='routing'): Use ONLY when ALL retrieved knowledge "
-            "chunks are genuinely off-topic — not simply sparse or low-similarity. "
-            "If any chunk discusses the same general subject as the question, prefer "
-            "clarification (rule 2) over routing.\n\n"
+            "DECISION RULES — apply in strict priority order:\n"
+            "1. ANSWER (response_type='answer'): Use when the knowledge chunks are "
+            "topically related to the question. Cite all sources that contributed. "
+            "Set grounded=true. If sources disagree, present the most directly "
+            "relevant view and briefly note alternatives.\n"
+            "2. ROUTE (response_type='routing'): Use ONLY when ALL knowledge chunks "
+            "are genuinely off-topic relative to the question. Route to ALL SMEs "
+            "whose specialization or sub_areas match the question. If no SME matches, "
+            "escalate to administrator.\n\n"
 
             "SYNTHESIS RULES:\n"
-            "- Draw from MULTIPLE complementary sources when available — cite ALL contributing entries\n"
+            "- Draw from MULTIPLE complementary sources — cite ALL contributing entries\n"
             "- Keep answers concise but complete: 2–4 paragraphs\n"
-            "- Do not repeat information verbatim from chunks — synthesize and paraphrase\n"
-            "- If sources disagree, present the most directly relevant view and briefly note alternatives\n\n"
-
-            "ROUTING RULES (only when genuinely off-topic):\n"
-            "- Route to ALL SMEs whose specialization or sub_areas match the question\n"
-            "- If no SME matches, escalate to administrator\n\n"
+            "- Do not repeat information verbatim — synthesize and paraphrase\n\n"
 
             "JSON FORMAT — output ONLY valid JSON, no preamble:\n"
-            '{"response_type": "answer"|"clarification"|"routing", '
-            '"answer": string (REQUIRED for all types), "grounded": boolean, '
+            '{"response_type": "answer"|"routing", '
+            '"answer": string (REQUIRED), "grounded": boolean, '
             '"sources": [{"entry_id": string, "sme_name": string, "topic": string}], '
             '"routed_to": [{"type": "sme"|"admin", "sme_name": string|null, "specialization": string, "reason": string}]|null, '
             '"disclaimer": string|null}\n\n'
 
             "FOR answer type:\n"
             "- grounded: true\n"
-            "- sources: list ALL entry_ids whose content contributed to the answer\n"
+            "- sources: list ALL entry_ids whose content contributed\n"
             '- disclaimer: "This information is based on approved SME knowledge and may not constitute professional advice."\n'
-            "FOR clarification type: grounded=false, sources=[], routed_to=null\n"
             "FOR routing type: grounded=false, sources=[], populate routed_to"
         )
 
         quality_label = "WEAK"
-        if max_sim >= 0.50 and num_relevant >= 3:
+        if max_sim >= 0.60:
+            quality_label = "STRONG"
+        elif max_sim >= 0.50 and num_relevant >= 3:
             quality_label = "STRONG"
         elif max_sim >= 0.40 and num_relevant >= 2:
             quality_label = "MODERATE"
 
         print(f"[DECISION] rag_quality: max_sim={max_sim:.3f} num_relevant={num_relevant} label={quality_label}", flush=True)
 
+        if quality_label == "WEAK":
+            print(f"[DECISION] weak_retrieval_guard: forcing clarification (deterministic)", flush=True)
+            clarify_system = (
+                "You are a knowledge base assistant. The retrieved knowledge is sparse "
+                "and may not address the user's specific intent. Generate a short, "
+                "specific clarifying follow-up question that narrows what the user is asking. "
+                "Output ONLY the question text, no preamble, no JSON."
+            )
+            clarify_msg = (
+                f"User question: {question}\n\n"
+                f"Sparse knowledge match:\n{knowledge_context or '(none)'}"
+            )
+            clarify_text, clarify_usage = await llm_client.complete(
+                system=clarify_system,
+                messages=[{"role": "user", "content": clarify_msg}],
+                max_tokens=128,
+                model=MODEL_SMART,
+                temperature=0,
+            )
+            clarifying_q = (clarify_text or "").strip()
+            if not clarifying_q:
+                clarifying_q = "Could you be more specific about what you're looking for?"
+            session_store.append(session_id, "user", question)
+            session_store.append(session_id, "assistant", clarifying_q)
+            return QueryResponse(
+                answer=clarifying_q,
+                grounded=False,
+                sources=[],
+                disclaimer=None,
+                session_id=session_id,
+                response_type="clarification",
+                routed_to=None,
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                usage=UsageSchema(
+                    prompt_tokens=clarify_usage.prompt_tokens,
+                    completion_tokens=clarify_usage.completion_tokens,
+                    total_tokens=clarify_usage.total_tokens,
+                    model=clarify_usage.model,
+                ),
+            )
+
+        print(f"[DECISION] rag_path: quality={quality_label} → normal RAG answer flow", flush=True)
+
         user_msg = (
-            f"Retrieval quality: {num_relevant} chunk(s), max similarity {max_sim:.2f} — {quality_label} match. "
-            f"{'Prefer clarification over forced answers from sparse evidence.' if quality_label == 'WEAK' else ''}\n\n"
             f"{history_text}"
             f"Question: {question}\n\n"
             f"Relevant knowledge:\n{knowledge_context or '(none)'}\n\n"
