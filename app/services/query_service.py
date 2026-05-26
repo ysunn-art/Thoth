@@ -63,9 +63,10 @@ class QueryService:
                 model=MODEL_SMART,
                 temperature=0,
             )
+            no_sme_usage = check_usage
             try:
-                check_parsed = json.loads(check_text)
-            except json.JSONDecodeError:
+                check_parsed = json.loads(check_text or "{}")
+            except (json.JSONDecodeError, TypeError):
                 check_parsed = {}
 
             if check_parsed.get("decision") == "answer":
@@ -84,10 +85,10 @@ class QueryService:
                     routed_to=None,
                     timestamp=datetime.now(timezone.utc).isoformat(),
                     usage=UsageSchema(
-                        prompt_tokens=check_usage.prompt_tokens,
-                        completion_tokens=check_usage.completion_tokens,
-                        total_tokens=check_usage.total_tokens,
-                        model=check_usage.model,
+                        prompt_tokens=no_sme_usage.prompt_tokens,
+                        completion_tokens=no_sme_usage.completion_tokens,
+                        total_tokens=no_sme_usage.total_tokens,
+                        model=no_sme_usage.model,
                     ),
                 )
 
@@ -97,10 +98,10 @@ class QueryService:
                 session_id,
                 "No SMEs are registered and this question requires domain expertise.",
                 UsageSchema(
-                    prompt_tokens=check_usage.prompt_tokens,
-                    completion_tokens=check_usage.completion_tokens,
-                    total_tokens=check_usage.total_tokens,
-                    model=check_usage.model,
+                    prompt_tokens=no_sme_usage.prompt_tokens,
+                    completion_tokens=no_sme_usage.completion_tokens,
+                    total_tokens=no_sme_usage.total_tokens,
+                    model=no_sme_usage.model,
                 ),
             )
 
@@ -151,6 +152,21 @@ class QueryService:
             temperature=0,
         )
 
+        if not response_text or not response_text.strip():
+            logger.error("llm_empty_response_in_classify prompt_tokens=%d", usage.prompt_tokens)
+            session_store.append(session_id, "user", question)
+            session_store.append(session_id, "assistant", _ADMIN_REFUSAL)
+            return self._build_admin_escalation(
+                session_id,
+                "LLM returned an empty response during classification.",
+                UsageSchema(
+                    prompt_tokens=usage.prompt_tokens,
+                    completion_tokens=usage.completion_tokens,
+                    total_tokens=usage.total_tokens,
+                    model=usage.model,
+                ),
+            )
+
         try:
             parsed = json.loads(response_text)
         except json.JSONDecodeError:
@@ -180,10 +196,11 @@ class QueryService:
                     model=MODEL_SMART,
                     temperature=0,
                 )
-                answer_text = fallback_text.strip()
-                usage.prompt_tokens += fallback_usage.prompt_tokens
-                usage.completion_tokens += fallback_usage.completion_tokens
-                usage.total_tokens += fallback_usage.total_tokens
+                if fallback_text and fallback_text.strip():
+                    answer_text = fallback_text.strip()
+                    usage.prompt_tokens += fallback_usage.prompt_tokens
+                    usage.completion_tokens += fallback_usage.completion_tokens
+                    usage.total_tokens += fallback_usage.total_tokens
 
             session_store.append(session_id, "user", question)
             session_store.append(session_id, "assistant", answer_text)
@@ -402,6 +419,22 @@ class QueryService:
             temperature=0,
         )
 
+        if not response_text or not response_text.strip():
+            logger.error("llm_empty_response prompt_tokens=%d completion_tokens=%d",
+                         usage.prompt_tokens, usage.completion_tokens)
+            session_store.append(session_id, "user", question)
+            session_store.append(session_id, "assistant", _ADMIN_REFUSAL)
+            return self._build_admin_escalation(
+                session_id,
+                "LLM returned an empty response — unable to process question.",
+                UsageSchema(
+                    prompt_tokens=usage.prompt_tokens,
+                    completion_tokens=usage.completion_tokens,
+                    total_tokens=usage.total_tokens,
+                    model=usage.model,
+                ),
+            )
+
         try:
             parsed = json.loads(response_text)
         except json.JSONDecodeError:
@@ -437,22 +470,25 @@ class QueryService:
             usage.completion_tokens += retry_usage.completion_tokens
             usage.total_tokens += retry_usage.total_tokens
 
-            try:
-                retry_parsed = json.loads(retry_text)
-            except json.JSONDecodeError:
-                start = retry_text.find("{")
-                end = retry_text.rfind("}") + 1
-                retry_parsed = json.loads(retry_text[start:end]) if start != -1 else {}
+            if not retry_text or not retry_text.strip():
+                logger.error("llm_empty_response_in_guard_retry")
+            else:
+                try:
+                    retry_parsed = json.loads(retry_text)
+                except json.JSONDecodeError:
+                    start = retry_text.find("{")
+                    end = retry_text.rfind("}") + 1
+                    retry_parsed = json.loads(retry_text[start:end]) if start != -1 else {}
 
-            answer = retry_parsed.get("answer") or answer
-            response_type = "answer"
-            parsed["grounded"] = True
-            parsed["sources"] = retry_parsed.get("sources", [])
-            parsed["disclaimer"] = (
-                "This information is based on approved SME knowledge "
-                "and may not constitute professional advice."
-            )
-            parsed["routed_to"] = None
+                answer = retry_parsed.get("answer") or answer
+                response_type = "answer"
+                parsed["grounded"] = True
+                parsed["sources"] = retry_parsed.get("sources", [])
+                parsed["disclaimer"] = (
+                    "This information is based on approved SME knowledge "
+                    "and may not constitute professional advice."
+                )
+                parsed["routed_to"] = None
 
         session_store.append(session_id, "user", question)
         session_store.append(session_id, "assistant", answer)
