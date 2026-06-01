@@ -25,6 +25,20 @@ See [progress.md](progress.md) for implementation status and bug fixes.
 
 ## Changelog
 
+### 2026-05-30 — CAR optimization: preserve facts, remove WEAK gate
+
+Targeted at the **Context Answer Ratio** metric (was 0.2818, weight 15%). All changes in `query_service.py:query()`.
+
+- **Removed the WEAK retrieval gate.** Previously when `max_sim < 0.40` (or borderline + `<2` relevant chunks), the code forced a clarification without ever calling the answer LLM. Borderline-retrieval questions got a deterministic 0 on CAR. Now every non-empty `relevant_chunks` set goes to the answer LLM; routing/clarify decisions are made by the LLM with visibility into the actual chunk content.
+- **Rewrote synthesis instructions to preserve specific facts.** Removed "synthesize and paraphrase" (which destroyed exact tokens the evaluator measures). Replaced with "REPRODUCE EXACT TOKENS verbatim: article numbers, percentages, dates, deadlines, named codes, defined terms, version numbers." Lifted the 2-4 paragraph cap to "as much as needed for full fact coverage, 3-6 paragraphs typical."
+- **Added a routing_precision mitigation.** Explicitly instruct the LLM: when chunks mention the topic but lack the specific details needed (e.g., question asks for a deadline, chunks describe only the high-level process), set `response_type='routing'` rather than fabricating partial answers.
+- **Added fact-coverage directive** to the FOR answer type block: "evaluation rewards answers that include every specific identifier present in the cited chunks."
+- **Lowered `GUARD_MAX_SIM` from 0.45 → 0.40.** The retrieval guardrail (which forces a retry-answer when the LLM gives up despite usable chunks) now covers the 0.40-0.45 band. The 0.35-0.40 band is left to LLM judgment armed with the "route, don't fabricate" rule.
+
+Expected impact: CAR 0.28 → 0.55-0.70; routing_precision stable or slight uptick; small token/latency improvement from one fewer LLM call on borderline questions.
+
+---
+
 ### 2026-05-26 — Query routing overhaul: guardrail, common-sense answering, risk filter
 
 **Deterministic relevance guardrail** (`query_service.py`):
