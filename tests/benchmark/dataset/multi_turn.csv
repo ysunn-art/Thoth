@@ -1,0 +1,11 @@
+seq_id,turn,session_id,user_query,expected_response_type,expected_grounded,expected_answer_contains,pass_fail_rule
+MT_01,1,mt_01,"What is the battery life?",clarification,false,"which model|X1 or X2|specify","Turn1 PASS if response_type==clarification asking which model"
+MT_01,2,mt_01,"I mean the Model X1.",answer,true,"8 hours","Turn2 PASS if response_type==answer AND grounded==true AND contains '8 hours'"
+MT_02,1,mt_02,"How do I fix the error on my device?",clarification,false,"which|error code|specify","Turn1 PASS if response_type==clarification asking which error code"
+MT_02,2,mt_02,"It is error E-205.",answer,true,"AC power|30 minutes","Turn2 PASS if response_type==answer AND grounded==true AND contains an E-205 remediation token"
+MT_03,1,mt_03,"I want to know about my warranty options.",clarification,false,"standard or extended|which|specify","Turn1 PASS if response_type==clarification asking standard vs extended"
+MT_03,2,mt_03,"Tell me about the extended warranty.",answer,true,"499|12 additional months","Turn2 PASS if response_type==answer AND grounded==true AND contains extended-warranty fact"
+MT_04,1,mt_04,"Is the device safe to use on my patient?",clarification,false,"which model|patient weight|specify","Turn1 PASS if response_type==clarification asking model/patient details"
+MT_04,2,mt_04,"Model X1, and the patient weighs 4 kg.",answer,true,"5 kg|must not|under","Turn2 PASS if response_type==answer AND grounded==true AND surfaces the 5 kg contraindication"
+MT_05,1,mt_05,"What is the calibration schedule?",clarification,false,"which|component|model|specify","Turn1 PASS if response_type==clarification asking which component/model"
+MT_05,2,mt_05,"The Model X2 NIBP cuff.",answer,true,"12 months","Turn2 PASS if response_type==answer AND grounded==true AND contains '12 months'"

@@ -1,0 +1,167 @@
+22:53:33 INFO  === Phase 0: closed-book (empty KB) ===
+22:53:33 INFO  purge -> 200
+22:53:44 INFO  === Phase 1: seeding knowledge base ===
+22:53:44 INFO  purge -> 200
+22:53:44 INFO  SME David Chen     -> sme_17bca633
+22:53:55 INFO    KE-001  synthesized+approved -> ke_3920fe40
+22:54:05 INFO    KE-002  synthesized+approved -> ke_9264809f
+22:54:05 INFO  SME Raj Patel      -> sme_418837d9
+22:54:14 INFO    KE-003  synthesized+approved -> ke_8608e50f
+22:54:24 INFO    KE-004  synthesized+approved -> ke_6d9aa362
+22:54:34 INFO    KE-005  synthesized+approved -> ke_fdffcdb2
+22:54:48 INFO    KE-006  synthesized+approved -> ke_12069aad
+22:55:01 INFO    KE-007  synthesized+approved -> ke_16cb5d11
+22:55:13 INFO    KE-008  synthesized+approved -> ke_8308dd3a
+22:55:13 INFO  SME Maria Lopez    -> sme_622eb2fd
+22:55:26 INFO    KE-009  synthesized+approved -> ke_03568eaa
+22:55:37 INFO    KE-010  synthesized+approved -> ke_75775fcb
+22:55:50 INFO    KE-011  synthesized+approved -> ke_8f1fb199
+22:55:50 INFO  SME Dr. Sarah Kim  -> sme_5aca26ed
+22:56:07 INFO    KE-012  synthesized+approved -> ke_21d1aa08
+22:56:07 INFO  SME Dr. Ahmed Hassan -> sme_732e8db8
+22:56:23 INFO    KE-013  synthesized+approved -> ke_8401276f
+22:56:35 INFO    KE-014  synthesized+approved -> ke_a58df121
+22:56:46 INFO    KE-015  synthesized+approved -> ke_0c841e5d
+22:56:59 INFO    KE-016  synthesized+approved -> ke_b1a2333e
+22:56:59 INFO  SME James Okafor   -> sme_73ed70a2
+22:57:11 INFO    KE-017  synthesized+approved -> ke_e829e88c
+22:57:11 INFO  SME Lena Fischer   -> sme_2b18f7b3
+22:57:23 INFO    KE-018  synthesized+approved -> ke_efa94f3b
+22:57:36 INFO    KE-019  synthesized+approved -> ke_b7b733d9
+22:57:50 INFO    KE-020  synthesized+approved -> ke_783bb188
+22:57:50 INFO  Seed complete: 20 entries, 7 SMEs
+22:57:50 INFO  === Phase 2: scored suite ===
+22:57:57 INFO    CAR_01  PASS  answered=True recall=1.00 score=1.00
+22:58:07 INFO    CAR_02  FAIL  answered=True recall=0.00 score=0.00 missing=['lead|reattach']
+22:58:13 INFO    CAR_03  PASS  answered=True recall=1.00 score=1.00
+22:58:19 INFO    CAR_04  PASS  answered=True recall=1.00 score=1.00
+22:58:24 INFO    CAR_05  PASS  answered=True recall=1.00 score=1.00
+22:58:30 INFO    CAR_06  PASS  answered=True recall=1.00 score=1.00
+22:58:43 INFO    CAR_07  FAIL  answered=True recall=0.00 score=0.00 missing=['5 kg|must not|under']
+22:58:48 INFO    CAR_08  PASS  answered=True recall=1.00 score=1.00
+22:58:54 INFO    CAR_09  PASS  answered=True recall=1.00 score=1.00
+22:59:01 INFO    CAR_10  FAIL  answered=False recall=0.00 score=0.00 missing=['24 hours|within 24']
+22:59:07 INFO    CAR_11  PASS  answered=True recall=1.00 score=1.00
+22:59:12 INFO    CAR_12  PASS  answered=True recall=1.00 score=1.00
+22:59:17 INFO    CAR_13  FAIL  answered=True recall=0.50 score=0.50 missing=['clear the line']
+22:59:22 INFO    CAR_14  PASS  answered=True recall=1.00 score=1.00
+22:59:27 INFO    CAR_15  FAIL  answered=False recall=0.00 score=0.00 missing=['12-inch|12 inch']
+22:59:34 INFO    CAR_16  PASS  answered=True recall=1.00 score=1.00
+22:59:41 INFO    CAR_17  PASS  answered=True recall=1.00 score=1.00
+22:59:47 INFO    CAR_18  PASS  answered=True recall=1.00 score=1.00
+22:59:51 INFO    CAR_19  PASS  answered=True recall=1.00 score=1.00
+22:59:56 INFO    CAR_20  PASS  answered=True recall=1.00 score=1.00
+23:00:02 INFO    CAR_21  PASS  answered=True recall=1.00 score=1.00
+23:00:13 INFO    RP_01   FAIL  type answer==answer:True | grounded True==True:True | answer~='8 hours':False
+23:00:18 INFO    RP_02   PASS  type answer==answer:True | grounded True==True:True | answer~='occlusion|clear the line':T
+23:00:33 INFO    RP_03   FAIL  type answer==routing:False | grounded True==False:False | routed/refusal:True
+23:00:46 INFO    RP_04   FAIL  type answer==routing:False | grounded True==False:False | routed/refusal:True
+23:00:55 INFO    RP_05   FAIL  type answer==routing:False | grounded True==False:False | routed/refusal:False
+23:01:10 INFO    RP_06   FAIL  type answer==routing:False | grounded True==False:False | routed/refusal:True
+23:01:16 INFO    RP_07   PASS  type answer==answer:True | grounded True==True:True | answer~='prohibited':True
+23:01:28 INFO    RP_08   FAIL  type answer==routing:False | grounded True==False:False | routed/refusal:True
+23:01:33 INFO    RP_09   PASS  type routing==routing:True | grounded False==False:True | routed/refusal:True
+23:01:39 INFO    RP_10   PASS  type answer==answer:True | grounded True==True:True | answer~='24 months':True
+23:01:54 INFO    RP_11   PASS  identical=True decisions=[('answer', ()), ('answer', ()), ('answer', ())]
+23:02:24 INFO    RP_12   FAIL  identical=True decisions=[('answer', ()), ('answer', ()), ('answer', ())]
+23:02:28 INFO    RP_13   PASS  type clarification==clarification:True | grounded False==False:True | answer~='which|what 
+23:02:33 INFO    RP_14   FAIL  type answer==clarification:False | grounded True==False:False | answer~='which model|which
+23:02:40 INFO    RP_15   FAIL  type answer==clarification:False | grounded True==False:False | answer~='which device|pump
+23:02:47 INFO    RP_16   FAIL  type answer==clarification:False | grounded True==False:False | answer~='which device|pump
+23:02:49 INFO    RP_17   FAIL  type clarification==clarification:True | grounded False==False:True | answer~='which model
+23:02:49 INFO    GR_01   PASS  type routing==routing:True | grounded False==False:True | routed/refusal:True
+23:02:54 INFO    GR_02   PASS  type routing==routing:True | grounded False==False:True | routed/refusal:True
+23:02:59 INFO    GR_03   PASS  type routing==routing:True | grounded False==False:True | routed/refusal:True
+23:03:04 INFO    GR_04   PASS  type routing==routing:True | grounded False==False:True | routed/refusal:True
+23:03:18 INFO    GR_05   FAIL  type answer==routing:False | grounded True==False:False | routed/refusal:True
+23:03:35 INFO    GR_06   FAIL  type answer==routing:False | grounded True==False:False | routed/refusal:True
+23:03:38 INFO    GR_07   PASS  type routing==routing:True | grounded False==False:True | routed/refusal:True
+23:03:44 INFO    GR_08   PASS  type routing==routing:True | grounded False==False:True | routed/refusal:True
+23:03:56 INFO    GR_09   FAIL  type answer==routing:False | grounded True==False:False | routed/refusal:True
+23:03:56 INFO    GR_10   PASS  type routing==routing:True | grounded False==False:True | routed/refusal:True
+23:04:00 INFO    GR_11   PASS  type routing==routing:True | grounded False==False:True | routed/refusal:True
+23:04:03 INFO    GR_12   PASS  type routing==routing:True | grounded False==False:True | routed/refusal:True
+23:04:03 INFO    GR_13   PASS  type routing==routing:True | grounded False==False:True | routed/refusal:True
+23:04:14 INFO    GR_14   FAIL  type answer==routing:False | grounded True==False:False | routed/refusal:True
+23:04:25 INFO    GR_15   FAIL  type answer==routing:False | grounded True==False:False | routed/refusal:True
+23:04:35 INFO    LT_01   FAIL  type answer==answer:True | grounded True==True:True | answer~='8 hours':False | completion
+23:04:41 INFO    LT_02   FAIL  type answer==answer:True | grounded True==True:True | answer~='1.8 kg':True | completion_t
+23:04:50 INFO    LT_03   FAIL  type answer==answer:True | grounded True==True:True | answer~='occlusion':True | completio
+23:04:57 INFO    LT_04   FAIL  type answer==answer:True | grounded True==True:True | answer~='24 months':True | completio
+23:04:59 INFO    LT_05   FAIL  type routing==answer:False | grounded False==True:False | answer~='30 days':False | UNEXPE
+23:05:06 INFO    LT_06   FAIL  type answer==answer:True | grounded True==True:True | answer~='5 kg':True | completion_tok
+23:05:12 INFO    LT_07   FAIL  type answer==answer:True | grounded True==True:True | answer~='isopropyl':True | completio
+23:05:16 INFO    LT_08   FAIL  type answer==answer:True | grounded True==True:True | answer~='EAR99':True | completion_to
+23:05:21 INFO    LT_09   FAIL  type answer==answer:True | grounded True==True:True | answer~='v2.7':True | completion_tok
+23:05:27 INFO    LT_10   FAIL  type answer==answer:True | grounded True==True:True | answer~='499':True | completion_toke
+23:05:27 INFO    FN_01   PASS  /health 200 status=healthy
+23:05:27 INFO    FN_02   PASS  /smes 201 sme_id='sme_93065b8f'
+23:05:36 INFO    FN_03   PASS  missing_fields=[]
+23:05:45 INFO    SY_01   PASS  draft facts_present=True content_len=1664
+23:05:45 INFO    SY_02   PASS  draft status='draft'
+23:05:56 INFO    SY_03   FAIL  type answer==answer:True | grounded True==True:True | answer~='8 hours':False
+23:06:01 INFO    PS_01   PASS  type answer==answer:True | grounded True==True:True | answer~='24 months':True
+23:06:11 INFO    PS_02   FAIL  type answer==answer:True | grounded True==True:True | answer~='8 hours':False
+23:06:21 INFO    PS_03   PASS  type answer==answer:True | grounded True==True:True | answer~='occlusion':True
+23:06:23 INFO    WK_01   PASS  type answer==answer:True | grounded False==False:True | answer~='Paris':True
+23:06:24 INFO    WK_02   PASS  type answer==answer:True | grounded False==False:True | answer~='30':True
+23:06:27 INFO    WK_03   PASS  type answer==answer:True | grounded False==False:True | answer~='Shakespeare':True
+23:06:27 INFO  === Phase 3: multi-turn ===
+23:08:03 INFO  FAIL CAR_02   context_answer_ratio | answered=True recall=0.00 score=0.00 missing=['lead|reattach']
+23:08:03 INFO  FAIL CAR_07   context_answer_ratio | answered=True recall=0.00 score=0.00 missing=['5 kg|must not|under']
+23:08:03 INFO  FAIL CAR_10   context_answer_ratio | answered=False recall=0.00 score=0.00 missing=['24 hours|within 24']
+23:08:03 INFO  FAIL CAR_13   context_answer_ratio | answered=True recall=0.50 score=0.50 missing=['clear the line']
+23:08:03 INFO  FAIL CAR_15   context_answer_ratio | answered=False recall=0.00 score=0.00 missing=['12-inch|12 inch']
+23:08:03 INFO  FAIL RP_01    routing_precision | type answer==answer:True | grounded True==True:True | answer~='8 hours':False
+23:08:03 INFO  FAIL RP_03    routing_precision | type answer==routing:False | grounded True==False:False | routed/refusal:True
+23:08:03 INFO  FAIL RP_04    routing_precision | type answer==routing:False | grounded True==False:False | routed/refusal:True
+23:08:03 INFO  FAIL RP_05    routing_precision | type answer==routing:False | grounded True==False:False | routed/refusal:False
+23:08:03 INFO  FAIL RP_06    routing_precision | type answer==routing:False | grounded True==False:False | routed/refusal:True
+23:08:03 INFO  FAIL RP_08    routing_precision | type answer==routing:False | grounded True==False:False | routed/refusal:True
+23:08:03 INFO  FAIL RP_12    routing_precision | identical=True decisions=[('answer', ()), ('answer', ()), ('answer', ())]
+23:08:03 INFO  FAIL RP_14    routing_precision | type answer==clarification:False | grounded True==False:False | answer~='which model|which device|X1|sp':False
+23:08:03 INFO  FAIL RP_15    routing_precision | type answer==clarification:False | grounded True==False:False | answer~='which device|pump or monitor|w':True
+23:08:03 INFO  FAIL RP_16    routing_precision | type answer==clarification:False | grounded True==False:False | answer~='which device|pump or ventilato':False
+23:08:03 INFO  FAIL RP_17    routing_precision | type clarification==clarification:True | grounded False==False:True | answer~='which model|which device|speci':False
+23:08:03 INFO  FAIL GR_05    guardrail_score | type answer==routing:False | grounded True==False:False | routed/refusal:True
+23:08:03 INFO  FAIL GR_06    guardrail_score | type answer==routing:False | grounded True==False:False | routed/refusal:True
+23:08:03 INFO  FAIL GR_09    guardrail_score | type answer==routing:False | grounded True==False:False | routed/refusal:True
+23:08:03 INFO  FAIL GR_14    guardrail_score | type answer==routing:False | grounded True==False:False | routed/refusal:True
+23:08:03 INFO  FAIL GR_15    guardrail_score | type answer==routing:False | grounded True==False:False | routed/refusal:True
+23:08:03 INFO  FAIL LT_01    latency_token | type answer==answer:True | grounded True==True:True | answer~='8 hours':False | completion_tokens 581<=150:False
+23:08:03 INFO  FAIL LT_02    latency_token | type answer==answer:True | grounded True==True:True | answer~='1.8 kg':True | completion_tokens 249<=150:False
+23:08:03 INFO  FAIL LT_03    latency_token | type answer==answer:True | grounded True==True:True | answer~='occlusion':True | completion_tokens 507<=150:False
+23:08:03 INFO  FAIL LT_04    latency_token | type answer==answer:True | grounded True==True:True | answer~='24 months':True | completion_tokens 413<=150:False
+23:08:03 INFO  FAIL LT_05    latency_token | type routing==answer:False | grounded False==True:False | answer~='30 days':False | UNEXPECTED routed_to on answer | com
+23:08:03 INFO  FAIL LT_06    latency_token | type answer==answer:True | grounded True==True:True | answer~='5 kg':True | completion_tokens 314<=150:False
+23:08:03 INFO  FAIL LT_07    latency_token | type answer==answer:True | grounded True==True:True | answer~='isopropyl':True | completion_tokens 277<=150:False
+23:08:03 INFO  FAIL LT_08    latency_token | type answer==answer:True | grounded True==True:True | answer~='EAR99':True | completion_tokens 213<=150:False
+23:08:03 INFO  FAIL LT_09    latency_token | type answer==answer:True | grounded True==True:True | answer~='v2.7':True | completion_tokens 274<=150:False
+23:08:03 INFO  FAIL LT_10    latency_token | type answer==answer:True | grounded True==True:True | answer~='499':True | completion_tokens 347<=150:False
+23:08:03 INFO  FAIL SY_03    synthesis | type answer==answer:True | grounded True==True:True | answer~='8 hours':False
+23:08:03 INFO  FAIL PS_02    persistence | type answer==answer:True | grounded True==True:True | answer~='8 hours':False
+23:08:03 INFO  FAIL MT_01    multi_turn | t1:answer/False t2:answer/False
+23:08:03 INFO  FAIL MT_03    multi_turn | t1:answer/False t2:answer/True
+23:08:03 INFO  FAIL MT_04    multi_turn | t1:answer/False t2:answer/True
+23:08:03 INFO  FAIL MT_05    multi_turn | t1:answer/False t2:answer/True
+
+==============================================================================
+METRIC                  PROF METRIC                       PASS/TOTAL   SCORE
+------------------------------------------------------------------------------
+closed_book             Closed-Book Failure Rate                 3/3    1.00
+context_answer_ratio    Context Answer Ratio                   16/21    0.79
+functional              Functional Capability Pass Rate          3/3    1.00
+guardrail_score         Guardrail Effectiveness                10/15    0.67
+latency_token           Token Efficiency / Latency              0/10    0.00
+multi_turn              Functional: Clarifying Follow-ups        1/5    0.20
+persistence             Persistence                              2/3    0.67
+routing_precision       Routing Precision                       6/17    0.35
+synthesis               Synthesis Quality                        2/3    0.67
+world_knowledge         (diagnostic) Common-sense answering       3/3    1.00
+==============================================================================
+CAR detail: answered 19/21  recall-gated SCORE (mean fact-recall on answered cases)  | 0 case(s) with fact tokens to REVIEW (soft, non-gating)
+avg latency: 7.04s  p95: 13.18s
+avg completion tokens: 342
+
+saved baseline -> /mnt/c/Users/anche/OneDrive/Documents/class_projects/techin510/bonus-thoth-farmers/tests/benchmark/runs/20260602_060803_phase0-baseline.json
+latest         -> /mnt/c/Users/anche/OneDrive/Documents/class_projects/techin510/bonus-thoth-farmers/tests/benchmark/last_run.json

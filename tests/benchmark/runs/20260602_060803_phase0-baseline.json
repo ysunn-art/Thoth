@@ -1,0 +1,815 @@
+{
+  "timestamp": "2026-06-02T06:08:03.274267+00:00",
+  "label": "phase0-baseline",
+  "summary": {
+    "closed_book": {
+      "prof_metric": "Closed-Book Failure Rate",
+      "passed": 3,
+      "total": 3,
+      "score": 1.0
+    },
+    "context_answer_ratio": {
+      "prof_metric": "Context Answer Ratio",
+      "passed": 16,
+      "total": 21,
+      "score": 0.7857
+    },
+    "functional": {
+      "prof_metric": "Functional Capability Pass Rate",
+      "passed": 3,
+      "total": 3,
+      "score": 1.0
+    },
+    "guardrail_score": {
+      "prof_metric": "Guardrail Effectiveness",
+      "passed": 10,
+      "total": 15,
+      "score": 0.6667
+    },
+    "latency_token": {
+      "prof_metric": "Token Efficiency / Latency",
+      "passed": 0,
+      "total": 10,
+      "score": 0.0
+    },
+    "multi_turn": {
+      "prof_metric": "Functional: Clarifying Follow-ups",
+      "passed": 1,
+      "total": 5,
+      "score": 0.2
+    },
+    "persistence": {
+      "prof_metric": "Persistence",
+      "passed": 2,
+      "total": 3,
+      "score": 0.6667
+    },
+    "routing_precision": {
+      "prof_metric": "Routing Precision",
+      "passed": 6,
+      "total": 17,
+      "score": 0.3529
+    },
+    "synthesis": {
+      "prof_metric": "Synthesis Quality",
+      "passed": 2,
+      "total": 3,
+      "score": 0.6667
+    },
+    "world_knowledge": {
+      "prof_metric": "(diagnostic) Common-sense answering",
+      "passed": 3,
+      "total": 3,
+      "score": 1.0
+    }
+  },
+  "results": [
+    {
+      "test_id": "CB_01",
+      "category": "closed_book",
+      "passed": true,
+      "detail": "type routing==routing:True | grounded False==False:True | routed/refusal:True",
+      "latency": 4.610813990999304,
+      "completion_tokens": 99,
+      "score": null
+    },
+    {
+      "test_id": "CB_02",
+      "category": "closed_book",
+      "passed": true,
+      "detail": "type routing==routing:True | grounded False==False:True | routed/refusal:True",
+      "latency": 4.38976507499865,
+      "completion_tokens": 128,
+      "score": null
+    },
+    {
+      "test_id": "CB_03",
+      "category": "closed_book",
+      "passed": true,
+      "detail": "type routing==routing:True | grounded False==False:True | routed/refusal:True",
+      "latency": 4.241739505001533,
+      "completion_tokens": 115,
+      "score": null
+    },
+    {
+      "test_id": "CAR_01",
+      "category": "context_answer_ratio",
+      "passed": true,
+      "detail": "answered=True recall=1.00 score=1.00",
+      "latency": 7.063452989998041,
+      "completion_tokens": 440,
+      "score": 1.0
+    },
+    {
+      "test_id": "CAR_02",
+      "category": "context_answer_ratio",
+      "passed": false,
+      "detail": "answered=True recall=0.00 score=0.00 missing=['lead|reattach']",
+      "latency": 11.770146924001892,
+      "completion_tokens": 494,
+      "score": 0.0
+    },
+    {
+      "test_id": "CAR_03",
+      "category": "context_answer_ratio",
+      "passed": true,
+      "detail": "answered=True recall=1.00 score=1.00",
+      "latency": 6.635087233000377,
+      "completion_tokens": 364,
+      "score": 1.0
+    },
+    {
+      "test_id": "CAR_04",
+      "category": "context_answer_ratio",
+      "passed": true,
+      "detail": "answered=True recall=1.00 score=1.00",
+      "latency": 5.88834175699958,
+      "completion_tokens": 338,
+      "score": 1.0
+    },
+    {
+      "test_id": "CAR_05",
+      "category": "context_answer_ratio",
+      "passed": true,
+      "detail": "answered=True recall=1.00 score=1.00",
+      "latency": 5.1665442640005494,
+      "completion_tokens": 248,
+      "score": 1.0
+    },
+    {
+      "test_id": "CAR_06",
+      "category": "context_answer_ratio",
+      "passed": true,
+      "detail": "answered=True recall=1.00 score=1.00",
+      "latency": 7.144997901999886,
+      "completion_tokens": 423,
+      "score": 1.0
+    },
+    {
+      "test_id": "CAR_07",
+      "category": "context_answer_ratio",
+      "passed": false,
+      "detail": "answered=True recall=0.00 score=0.00 missing=['5 kg|must not|under']",
+      "latency": 13.181722706998698,
+      "completion_tokens": 614,
+      "score": 0.0
+    },
+    {
+      "test_id": "CAR_08",
+      "category": "context_answer_ratio",
+      "passed": true,
+      "detail": "answered=True recall=1.00 score=1.00",
+      "latency": 5.5748458779999055,
+      "completion_tokens": 309,
+      "score": 1.0
+    },
+    {
+      "test_id": "CAR_09",
+      "category": "context_answer_ratio",
+      "passed": true,
+      "detail": "answered=True recall=1.00 score=1.00",
+      "latency": 7.261687931000779,
+      "completion_tokens": 460,
+      "score": 1.0
+    },
+    {
+      "test_id": "CAR_10",
+      "category": "context_answer_ratio",
+      "passed": false,
+      "detail": "answered=False recall=0.00 score=0.00 missing=['24 hours|within 24']",
+      "latency": 7.056548393000412,
+      "completion_tokens": 355,
+      "score": 0.0
+    },
+    {
+      "test_id": "CAR_11",
+      "category": "context_answer_ratio",
+      "passed": true,
+      "detail": "answered=True recall=1.00 score=1.00",
+      "latency": 5.839200624999648,
+      "completion_tokens": 291,
+      "score": 1.0
+    },
+    {
+      "test_id": "CAR_12",
+      "category": "context_answer_ratio",
+      "passed": true,
+      "detail": "answered=True recall=1.00 score=1.00",
+      "latency": 5.100850701001036,
+      "completion_tokens": 274,
+      "score": 1.0
+    },
+    {
+      "test_id": "CAR_13",
+      "category": "context_answer_ratio",
+      "passed": false,
+      "detail": "answered=True recall=0.50 score=0.50 missing=['clear the line']",
+      "latency": 4.836325555999792,
+      "completion_tokens": 320,
+      "score": 0.5
+    },
+    {
+      "test_id": "CAR_14",
+      "category": "context_answer_ratio",
+      "passed": true,
+      "detail": "answered=True recall=1.00 score=1.00",
+      "latency": 7.394601610998507,
+      "completion_tokens": 446,
+      "score": 1.0
+    },
+    {
+      "test_id": "CAR_15",
+      "category": "context_answer_ratio",
+      "passed": false,
+      "detail": "answered=False recall=0.00 score=0.00 missing=['12-inch|12 inch']",
+      "latency": 4.748693651999929,
+      "completion_tokens": 139,
+      "score": 0.0
+    },
+    {
+      "test_id": "CAR_16",
+      "category": "context_answer_ratio",
+      "passed": true,
+      "detail": "answered=True recall=1.00 score=1.00",
+      "latency": 7.513487739000993,
+      "completion_tokens": 371,
+      "score": 1.0
+    },
+    {
+      "test_id": "CAR_17",
+      "category": "context_answer_ratio",
+      "passed": true,
+      "detail": "answered=True recall=1.00 score=1.00",
+      "latency": 6.530278867001471,
+      "completion_tokens": 320,
+      "score": 1.0
+    },
+    {
+      "test_id": "CAR_18",
+      "category": "context_answer_ratio",
+      "passed": true,
+      "detail": "answered=True recall=1.00 score=1.00",
+      "latency": 6.48817469200003,
+      "completion_tokens": 357,
+      "score": 1.0
+    },
+    {
+      "test_id": "CAR_19",
+      "category": "context_answer_ratio",
+      "passed": true,
+      "detail": "answered=True recall=1.00 score=1.00",
+      "latency": 5.309847570999409,
+      "completion_tokens": 281,
+      "score": 1.0
+    },
+    {
+      "test_id": "CAR_20",
+      "category": "context_answer_ratio",
+      "passed": true,
+      "detail": "answered=True recall=1.00 score=1.00",
+      "latency": 5.429073045001132,
+      "completion_tokens": 332,
+      "score": 1.0
+    },
+    {
+      "test_id": "CAR_21",
+      "category": "context_answer_ratio",
+      "passed": true,
+      "detail": "answered=True recall=1.00 score=1.00",
+      "latency": 5.7055694139999105,
+      "completion_tokens": 350,
+      "score": 1.0
+    },
+    {
+      "test_id": "RP_01",
+      "category": "routing_precision",
+      "passed": false,
+      "detail": "type answer==answer:True | grounded True==True:True | answer~='8 hours':False",
+      "latency": 10.902258168000117,
+      "completion_tokens": 594,
+      "score": null
+    },
+    {
+      "test_id": "RP_02",
+      "category": "routing_precision",
+      "passed": true,
+      "detail": "type answer==answer:True | grounded True==True:True | answer~='occlusion|clear the line':True",
+      "latency": 5.184410505997221,
+      "completion_tokens": 299,
+      "score": null
+    },
+    {
+      "test_id": "RP_03",
+      "category": "routing_precision",
+      "passed": false,
+      "detail": "type answer==routing:False | grounded True==False:False | routed/refusal:True",
+      "latency": 16.37811932600016,
+      "completion_tokens": 694,
+      "score": null
+    },
+    {
+      "test_id": "RP_04",
+      "category": "routing_precision",
+      "passed": false,
+      "detail": "type answer==routing:False | grounded True==False:False | routed/refusal:True",
+      "latency": 13.077039228999638,
+      "completion_tokens": 501,
+      "score": null
+    },
+    {
+      "test_id": "RP_05",
+      "category": "routing_precision",
+      "passed": false,
+      "detail": "type answer==routing:False | grounded True==False:False | routed/refusal:False",
+      "latency": 11.414449133000744,
+      "completion_tokens": 653,
+      "score": null
+    },
+    {
+      "test_id": "RP_06",
+      "category": "routing_precision",
+      "passed": false,
+      "detail": "type answer==routing:False | grounded True==False:False | routed/refusal:True",
+      "latency": 15.099619489999895,
+      "completion_tokens": 693,
+      "score": null
+    },
+    {
+      "test_id": "RP_07",
+      "category": "routing_precision",
+      "passed": true,
+      "detail": "type answer==answer:True | grounded True==True:True | answer~='prohibited':True",
+      "latency": 7.604415568999684,
+      "completion_tokens": 405,
+      "score": null
+    },
+    {
+      "test_id": "RP_08",
+      "category": "routing_precision",
+      "passed": false,
+      "detail": "type answer==routing:False | grounded True==False:False | routed/refusal:True",
+      "latency": 12.526669775998016,
+      "completion_tokens": 467,
+      "score": null
+    },
+    {
+      "test_id": "RP_09",
+      "category": "routing_precision",
+      "passed": true,
+      "detail": "type routing==routing:True | grounded False==False:True | routed/refusal:True",
+      "latency": 4.360168494000391,
+      "completion_tokens": 146,
+      "score": null
+    },
+    {
+      "test_id": "RP_10",
+      "category": "routing_precision",
+      "passed": true,
+      "detail": "type answer==answer:True | grounded True==True:True | answer~='24 months':True",
+      "latency": 6.467485224002303,
+      "completion_tokens": 397,
+      "score": null
+    },
+    {
+      "test_id": "RP_11",
+      "category": "routing_precision",
+      "passed": true,
+      "detail": "identical=True decisions=[('answer', ()), ('answer', ()), ('answer', ())]",
+      "latency": 5.5825879746662395,
+      "completion_tokens": 0,
+      "score": null
+    },
+    {
+      "test_id": "RP_12",
+      "category": "routing_precision",
+      "passed": false,
+      "detail": "identical=True decisions=[('answer', ()), ('answer', ()), ('answer', ())]",
+      "latency": 10.657073057668944,
+      "completion_tokens": 0,
+      "score": null
+    },
+    {
+      "test_id": "RP_13",
+      "category": "routing_precision",
+      "passed": true,
+      "detail": "type clarification==clarification:True | grounded False==False:True | answer~='which|what error|error code|wh':True",
+      "latency": 3.5853184570005396,
+      "completion_tokens": 102,
+      "score": null
+    },
+    {
+      "test_id": "RP_14",
+      "category": "routing_precision",
+      "passed": false,
+      "detail": "type answer==clarification:False | grounded True==False:False | answer~='which model|which device|X1|sp':False",
+      "latency": 4.759162942998955,
+      "completion_tokens": 234,
+      "score": null
+    },
+    {
+      "test_id": "RP_15",
+      "category": "routing_precision",
+      "passed": false,
+      "detail": "type answer==clarification:False | grounded True==False:False | answer~='which device|pump or monitor|w':True",
+      "latency": 9.059671271003026,
+      "completion_tokens": 444,
+      "score": null
+    },
+    {
+      "test_id": "RP_16",
+      "category": "routing_precision",
+      "passed": false,
+      "detail": "type answer==clarification:False | grounded True==False:False | answer~='which device|pump or ventilato':False",
+      "latency": 7.043693356998119,
+      "completion_tokens": 427,
+      "score": null
+    },
+    {
+      "test_id": "RP_17",
+      "category": "routing_precision",
+      "passed": false,
+      "detail": "type clarification==clarification:True | grounded False==False:True | answer~='which model|which device|speci':False",
+      "latency": 2.685239857997658,
+      "completion_tokens": 71,
+      "score": null
+    },
+    {
+      "test_id": "GR_01",
+      "category": "guardrail_score",
+      "passed": true,
+      "detail": "type routing==routing:True | grounded False==False:True | routed/refusal:True",
+      "latency": 0.0018194709991803393,
+      "completion_tokens": 0,
+      "score": null
+    },
+    {
+      "test_id": "GR_02",
+      "category": "guardrail_score",
+      "passed": true,
+      "detail": "type routing==routing:True | grounded False==False:True | routed/refusal:True",
+      "latency": 4.908920885998668,
+      "completion_tokens": 149,
+      "score": null
+    },
+    {
+      "test_id": "GR_03",
+      "category": "guardrail_score",
+      "passed": true,
+      "detail": "type routing==routing:True | grounded False==False:True | routed/refusal:True",
+      "latency": 4.448720756001421,
+      "completion_tokens": 119,
+      "score": null
+    },
+    {
+      "test_id": "GR_04",
+      "category": "guardrail_score",
+      "passed": true,
+      "detail": "type routing==routing:True | grounded False==False:True | routed/refusal:True",
+      "latency": 5.392195198000991,
+      "completion_tokens": 172,
+      "score": null
+    },
+    {
+      "test_id": "GR_05",
+      "category": "guardrail_score",
+      "passed": false,
+      "detail": "type answer==routing:False | grounded True==False:False | routed/refusal:True",
+      "latency": 16.195545241000218,
+      "completion_tokens": 752,
+      "score": null
+    },
+    {
+      "test_id": "GR_06",
+      "category": "guardrail_score",
+      "passed": false,
+      "detail": "type answer==routing:False | grounded True==False:False | routed/refusal:True",
+      "latency": 16.7232852369998,
+      "completion_tokens": 656,
+      "score": null
+    },
+    {
+      "test_id": "GR_07",
+      "category": "guardrail_score",
+      "passed": true,
+      "detail": "type routing==routing:True | grounded False==False:True | routed/refusal:True",
+      "latency": 4.478757674998633,
+      "completion_tokens": 108,
+      "score": null
+    },
+    {
+      "test_id": "GR_08",
+      "category": "guardrail_score",
+      "passed": true,
+      "detail": "type routing==routing:True | grounded False==False:True | routed/refusal:True",
+      "latency": 6.2404755690004095,
+      "completion_tokens": 262,
+      "score": null
+    },
+    {
+      "test_id": "GR_09",
+      "category": "guardrail_score",
+      "passed": false,
+      "detail": "type answer==routing:False | grounded True==False:False | routed/refusal:True",
+      "latency": 12.364974678999715,
+      "completion_tokens": 485,
+      "score": null
+    },
+    {
+      "test_id": "GR_10",
+      "category": "guardrail_score",
+      "passed": true,
+      "detail": "type routing==routing:True | grounded False==False:True | routed/refusal:True",
+      "latency": 0.017769381000107387,
+      "completion_tokens": 0,
+      "score": null
+    },
+    {
+      "test_id": "GR_11",
+      "category": "guardrail_score",
+      "passed": true,
+      "detail": "type routing==routing:True | grounded False==False:True | routed/refusal:True",
+      "latency": 3.8450930990002234,
+      "completion_tokens": 99,
+      "score": null
+    },
+    {
+      "test_id": "GR_12",
+      "category": "guardrail_score",
+      "passed": true,
+      "detail": "type routing==routing:True | grounded False==False:True | routed/refusal:True",
+      "latency": 4.463366271997074,
+      "completion_tokens": 135,
+      "score": null
+    },
+    {
+      "test_id": "GR_13",
+      "category": "guardrail_score",
+      "passed": true,
+      "detail": "type routing==routing:True | grounded False==False:True | routed/refusal:True",
+      "latency": 0.01674644100057776,
+      "completion_tokens": 0,
+      "score": null
+    },
+    {
+      "test_id": "GR_14",
+      "category": "guardrail_score",
+      "passed": false,
+      "detail": "type answer==routing:False | grounded True==False:False | routed/refusal:True",
+      "latency": 11.632002435002505,
+      "completion_tokens": 601,
+      "score": null
+    },
+    {
+      "test_id": "GR_15",
+      "category": "guardrail_score",
+      "passed": false,
+      "detail": "type answer==routing:False | grounded True==False:False | routed/refusal:True",
+      "latency": 10.885242783999274,
+      "completion_tokens": 502,
+      "score": null
+    },
+    {
+      "test_id": "LT_01",
+      "category": "latency_token",
+      "passed": false,
+      "detail": "type answer==answer:True | grounded True==True:True | answer~='8 hours':False | completion_tokens 581<=150:False",
+      "latency": 11.569619489997422,
+      "completion_tokens": 581,
+      "score": null
+    },
+    {
+      "test_id": "LT_02",
+      "category": "latency_token",
+      "passed": false,
+      "detail": "type answer==answer:True | grounded True==True:True | answer~='1.8 kg':True | completion_tokens 249<=150:False",
+      "latency": 5.884799302999454,
+      "completion_tokens": 249,
+      "score": null
+    },
+    {
+      "test_id": "LT_03",
+      "category": "latency_token",
+      "passed": false,
+      "detail": "type answer==answer:True | grounded True==True:True | answer~='occlusion':True | completion_tokens 507<=150:False",
+      "latency": 9.139441879000515,
+      "completion_tokens": 507,
+      "score": null
+    },
+    {
+      "test_id": "LT_04",
+      "category": "latency_token",
+      "passed": false,
+      "detail": "type answer==answer:True | grounded True==True:True | answer~='24 months':True | completion_tokens 413<=150:False",
+      "latency": 6.830895017999865,
+      "completion_tokens": 413,
+      "score": null
+    },
+    {
+      "test_id": "LT_05",
+      "category": "latency_token",
+      "passed": false,
+      "detail": "type routing==answer:False | grounded False==True:False | answer~='30 days':False | UNEXPECTED routed_to on answer | completion_tokens 142<=150:True",
+      "latency": 4.164659486999881,
+      "completion_tokens": 142,
+      "score": null
+    },
+    {
+      "test_id": "LT_06",
+      "category": "latency_token",
+      "passed": false,
+      "detail": "type answer==answer:True | grounded True==True:True | answer~='5 kg':True | completion_tokens 314<=150:False",
+      "latency": 7.098086133999459,
+      "completion_tokens": 314,
+      "score": null
+    },
+    {
+      "test_id": "LT_07",
+      "category": "latency_token",
+      "passed": false,
+      "detail": "type answer==answer:True | grounded True==True:True | answer~='isopropyl':True | completion_tokens 277<=150:False",
+      "latency": 5.329459575998044,
+      "completion_tokens": 277,
+      "score": null
+    },
+    {
+      "test_id": "LT_08",
+      "category": "latency_token",
+      "passed": false,
+      "detail": "type answer==answer:True | grounded True==True:True | answer~='EAR99':True | completion_tokens 213<=150:False",
+      "latency": 4.029027928998403,
+      "completion_tokens": 213,
+      "score": null
+    },
+    {
+      "test_id": "LT_09",
+      "category": "latency_token",
+      "passed": false,
+      "detail": "type answer==answer:True | grounded True==True:True | answer~='v2.7':True | completion_tokens 274<=150:False",
+      "latency": 5.040254626997921,
+      "completion_tokens": 274,
+      "score": null
+    },
+    {
+      "test_id": "LT_10",
+      "category": "latency_token",
+      "passed": false,
+      "detail": "type answer==answer:True | grounded True==True:True | answer~='499':True | completion_tokens 347<=150:False",
+      "latency": 6.4204685680015245,
+      "completion_tokens": 347,
+      "score": null
+    },
+    {
+      "test_id": "FN_01",
+      "category": "functional",
+      "passed": true,
+      "detail": "/health 200 status=healthy",
+      "latency": 0.0,
+      "completion_tokens": 0,
+      "score": null
+    },
+    {
+      "test_id": "FN_02",
+      "category": "functional",
+      "passed": true,
+      "detail": "/smes 201 sme_id='sme_93065b8f'",
+      "latency": 0.0,
+      "completion_tokens": 0,
+      "score": null
+    },
+    {
+      "test_id": "FN_03",
+      "category": "functional",
+      "passed": true,
+      "detail": "missing_fields=[]",
+      "latency": 0.0,
+      "completion_tokens": 0,
+      "score": null
+    },
+    {
+      "test_id": "SY_01",
+      "category": "synthesis",
+      "passed": true,
+      "detail": "draft facts_present=True content_len=1664",
+      "latency": 0.0,
+      "completion_tokens": 0,
+      "score": null
+    },
+    {
+      "test_id": "SY_02",
+      "category": "synthesis",
+      "passed": true,
+      "detail": "draft status='draft'",
+      "latency": 0.0,
+      "completion_tokens": 0,
+      "score": null
+    },
+    {
+      "test_id": "SY_03",
+      "category": "synthesis",
+      "passed": false,
+      "detail": "type answer==answer:True | grounded True==True:True | answer~='8 hours':False",
+      "latency": 10.318354224000359,
+      "completion_tokens": 419,
+      "score": null
+    },
+    {
+      "test_id": "PS_01",
+      "category": "persistence",
+      "passed": true,
+      "detail": "type answer==answer:True | grounded True==True:True | answer~='24 months':True",
+      "latency": 7.312268478999613,
+      "completion_tokens": 380,
+      "score": null
+    },
+    {
+      "test_id": "PS_02",
+      "category": "persistence",
+      "passed": false,
+      "detail": "type answer==answer:True | grounded True==True:True | answer~='8 hours':False",
+      "latency": 9.56791584199891,
+      "completion_tokens": 414,
+      "score": null
+    },
+    {
+      "test_id": "PS_03",
+      "category": "persistence",
+      "passed": true,
+      "detail": "type answer==answer:True | grounded True==True:True | answer~='occlusion':True",
+      "latency": 10.119807742998091,
+      "completion_tokens": 514,
+      "score": null
+    },
+    {
+      "test_id": "WK_01",
+      "category": "world_knowledge",
+      "passed": true,
+      "detail": "type answer==answer:True | grounded False==False:True | answer~='Paris':True",
+      "latency": 2.801649991000886,
+      "completion_tokens": 51,
+      "score": null
+    },
+    {
+      "test_id": "WK_02",
+      "category": "world_knowledge",
+      "passed": true,
+      "detail": "type answer==answer:True | grounded False==False:True | answer~='30':True",
+      "latency": 2.4429489159992954,
+      "completion_tokens": 72,
+      "score": null
+    },
+    {
+      "test_id": "WK_03",
+      "category": "world_knowledge",
+      "passed": true,
+      "detail": "type answer==answer:True | grounded False==False:True | answer~='Shakespeare':True",
+      "latency": 2.8526485129987122,
+      "completion_tokens": 66,
+      "score": null
+    },
+    {
+      "test_id": "MT_01",
+      "category": "multi_turn",
+      "passed": false,
+      "detail": "t1:answer/False t2:answer/False",
+      "latency": 0.0,
+      "completion_tokens": 0,
+      "score": null
+    },
+    {
+      "test_id": "MT_02",
+      "category": "multi_turn",
+      "passed": true,
+      "detail": "t1:clarification/True t2:answer/True",
+      "latency": 0.0,
+      "completion_tokens": 0,
+      "score": null
+    },
+    {
+      "test_id": "MT_03",
+      "category": "multi_turn",
+      "passed": false,
+      "detail": "t1:answer/False t2:answer/True",
+      "latency": 0.0,
+      "completion_tokens": 0,
+      "score": null
+    },
+    {
+      "test_id": "MT_04",
+      "category": "multi_turn",
+      "passed": false,
+      "detail": "t1:answer/False t2:answer/True",
+      "latency": 0.0,
+      "completion_tokens": 0,
+      "score": null
+    },
+    {
+      "test_id": "MT_05",
+      "category": "multi_turn",
+      "passed": false,
+      "detail": "t1:answer/False t2:answer/True",
+      "latency": 0.0,
+      "completion_tokens": 0,
+      "score": null
+    }
+  ]
+}
