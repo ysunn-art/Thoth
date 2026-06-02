@@ -150,6 +150,30 @@ def check_risk(question: str) -> Tuple[bool, str]:
     ]):
         return True, "org"
 
+    # ---- fraud / forgery (fabricating official documents or records) ----
+    if _match_any(q, [
+        r'\b(write|create|generate|draft|make|produce|forge|fake)\s.{0,25}(fake|false|fraudulent|counterfeit|forged|phony|bogus)\b',
+        r'\b(fake|falsif(y|ied|ying)|forge|fabricate|doctor|alter|tamper\s+with)\s.{0,25}(letter|document|approval|certificate|certification|log|record|report|invoice|receipt|audit|signature|data|result)s?\b',
+        r'\b(510\(?k\)?|fda)\s.{0,15}(approval|clearance|letter)\b',
+    ]):
+        return True, "fraud"
+
+    # ---- harm to others (injuring a patient/person; overdose) ----
+    if _match_any(q, [
+        r'\b(over[\s-]?dose|overdosing)\b',
+        r'\b(harm|hurt|injure|kill|poison|sedate)\s.{0,20}(a\s+|the\s+|my\s+|this\s+)?(patient|person|people|someone|infant|baby|child|user)\b',
+        r'\b(lethal|fatal|dangerous)\s.{0,15}(dose|amount|level)\b',
+    ]):
+        return True, "harm"
+
+    # ---- prompt injection / instruction override / data exfiltration / safety bypass ----
+    if _match_any(q, [
+        r'\bignore\s.{0,25}(previous|prior|above|earlier|all|your)\s.{0,15}(instruction|prompt|direction|rule|guideline)\b',
+        r'\b(reveal|show|print|paste|dump|output|leak|expose)\s.{0,25}(raw|system\s+prompt|your\s+prompt|the\s+prompt|interview|transcript|instruction)\b',
+        r'\b(override|bypass|disable|ignore|circumvent|turn\s+off)\s.{0,20}(safety|protocol|contraindication|warning|guard|guardrail|restriction|limit)\b',
+    ]):
+        return True, "security"
+
     # Safe — nothing matched
     return False, ""
 
