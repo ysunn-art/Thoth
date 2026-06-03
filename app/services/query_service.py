@@ -346,7 +346,9 @@ class QueryService:
             print(f"[DECISION] no_chunks: safe → _classify_and_route", flush=True)
             return await self._classify_and_route(question, session_id)
 
-        RELEVANCE_THRESHOLD = 0.35
+        # 0.45 from tests/benchmark/retrieval_prob.py sweep: entity-anchored chunks score
+        # ~0.65-0.88, so 0.45 keeps full recall while cutting low-sim sibling distractors.
+        RELEVANCE_THRESHOLD = 0.45
         relevant_chunks = [(c, e, s) for c, e, s in chunks if s >= RELEVANCE_THRESHOLD]
 
         print(f"[RETRIEVAL] total={len(chunks)} above_threshold={len(relevant_chunks)}", flush=True)
