@@ -28,14 +28,18 @@ This is a **proof-of-concept**, not production. The benchmark tests MVP function
 | Database | **PostgreSQL** (Docker image `ankane/pgvector`) | All structured data |
 | Vector search | **pgvector** extension + a sidecar **PQ index** (`pq/`) | Semantic search over approved knowledge |
 | ORM | **SQLAlchemy (async)** + **Alembic** migrations | Talks to Postgres |
-| LLM | **OpenRouter** -> Claude Haiku 4.5 (fast) + Sonnet 4.5 (smart) | Interview Qs, synthesis, Q&A |
+| LLM | **OpenRouter** -> Claude Haiku 4.5 (fast) + Sonnet 4.5 (smart) | Haiku: interview Qs + semantic chunking. Sonnet: synthesis, routing/classification, Q&A |
 | Embeddings | Local **sentence-transformers** `all-MiniLM-L6-v2` (384-dim) | No API key needed; runs on CPU |
 | File parsing | **pypdf** | Extracts text from uploaded PDFs |
 | Settings | **pydantic-settings** (`.env`) | Config |
 
 Note: CLAUDE.md mentions `claude-sonnet-4-20250514` for synthesis in places, but the live
-deployment routes through OpenRouter to `anthropic/claude-haiku-4.5` (fast: interviews,
-routing/classification) and `anthropic/claude-sonnet-4.5` (smart: synthesis, Q&A).
+deployment routes through OpenRouter. **Where each model is actually used (verified in code):**
+`anthropic/claude-haiku-4.5` (`MODEL_FAST`) runs **only two** call sites — interview turns
+(`interview_service.py:56`) and the LLM semantic chunker (`knowledge_service.py:215`).
+Everything in `query_service.py` — routing, classification, clarification, and RAG answers —
+runs on `anthropic/claude-sonnet-4.5` (`MODEL_SMART`), as does synthesis. (Earlier iterations
+routed/classified on Haiku; that is no longer the case.)
 
 ---
 
@@ -243,9 +247,12 @@ This reflects the current architecture **after the Phase 1+2 routing refactor** 
    still receives the raw question + full history.
 4. **Vector search** (`vector_repo.search`, `top_k=8`) — pgvector cosine over approved
    chunks (PQ approximate index used if trained, exact fallback otherwise).
-5. **Relevance filter**: `RELEVANCE_THRESHOLD = 0.30` (lowered from 0.35 per the Phase 0
-   probe: correct-chunk sims live ~0.34–0.65, so 0.30 maximizes recall; once the LLM owns
-   the decision the threshold is a recall filter, not a precision gate).
+5. **Relevance filter**: `RELEVANCE_THRESHOLD = 0.45` (`query_service.py:351`). This was
+   raised (0.30 → 0.45) alongside the move to small, self-contained semantic chunks: naming
+   the subject in every chunk lifts correct-chunk similarities well above the old 0.30–0.35
+   band, so a higher floor now trims noise without dropping the fact-bearing chunk. The LLM
+   still owns the answer/clarify/route decision; the threshold is a recall filter, not a
+   precision gate.
    - If **no chunks** OR **none above threshold** -> `_classify_and_route` (the no-RAG
      path; risk was already handled at the front gate).
 6. **RAG answer path** (when relevant chunks exist): build a prompt with the chunks +
@@ -273,14 +280,28 @@ Exact mechanics of how knowledge becomes searchable and what the LLM actually se
 query time. Investigated 2026-06-02; line numbers as of that date.
 
 ### Chunking strategy
-There are **two chunkers**, but only one feeds search:
+Rewritten 2026-06-03 (commit `5639f73`). The old fixed-width 800/100 character slicer is
+**gone**. The knowledge-entry chunker that feeds search now has two layers:
 
-- **Knowledge-entry chunker** — `knowledge_service.py:31` `_chunk_text()`. **This is what
-  gets embedded and searched.** Runs at **admin-approve** on `knowledge_entries.content`.
-  **Fixed-width raw character slicing**: `CHUNK_SIZE = 800` chars, `CHUNK_OVERLAP = 100`
-  chars → stride 700. No sentence/paragraph/markdown awareness, no token counting — a chunk
-  can start/end mid-sentence or mid-table. A 1500-char entry → 3 chunks; a 3200-char entry
-  → 5 chunks.
+- **Primary: LLM semantic chunker** — `knowledge_service.py:203` `_llm_chunk_text()`, called
+  at **admin-approve** (`admin_approve` → line 370) on `knowledge_entries.content`. A single
+  **Haiku** (`MODEL_FAST`, temperature 0) call segments the entry into small, self-contained
+  chunks (≈1–3 sentences, one fact/rule/spec each) and is instructed to **name the subject in
+  every chunk** (e.g. "The Model X1 battery lasts 8 hours" rather than a bare "Battery: 8
+  hours") so each chunk is retrievable on its own — directly fixing the old
+  RP_01/CAR_07/CAR_10 dilution failures. Numbers/codes/units/dates must be copied **verbatim**.
+  - **Verbatim fact guard** (`_facts_preserved`): any chunk that introduces a digit-bearing
+    token (number or alphanumeric code) absent from the source is rejected. If >30%
+    (`_MAX_INVALID_FRACTION`) of chunks fail, or the call errors / returns nothing, it
+    **falls back to the deterministic chunker**. Surviving chunks over `_MAX_CHUNK_CHARS = 1000`
+    are hard-split to respect MiniLM's token limit.
+- **Fallback: deterministic structure-aware chunker** — `knowledge_service.py:99` `_chunk_text()`.
+  Splits on section headings (`_SECTION_KEYWORDS` / markdown / short `label:` lines), then
+  bullets/paragraphs, and greedily packs pieces into `TARGET_CHUNK_CHARS = 400` chunks
+  (overlong single pieces hard-split). **No metadata prefix** — prepending "[topic — section]"
+  was found to inject non-query tokens that dilute the embedding and push chunks below
+  threshold, so wording is preserved verbatim. If no structure is detected, the whole entry is
+  packed as-is.
 - **Material chunker** — `material_service.py:12` (2000/200). **Vestigial for retrieval**:
   uploaded materials are stored to disk only and their text is pulled in at *synthesis*
   time; they are **not** embedded into `knowledge_chunks`. Uploaded files never become
@@ -291,21 +312,29 @@ There are **two chunkers**, but only one feeds search:
   `asyncio.to_thread`. No API key.
 - **384 dimensions** — `Vector(384)` column (`knowledge_chunk.py:14`), cosine distance,
   HNSW index. `config.py` `embedding_dim=384`.
-- **Caveat**: MiniLM truncates at ~**256 word-pieces**. An 800-char dense spec chunk can
-  exceed that, so the *tail* of a chunk may not be embedded at all.
+- **Caveat**: MiniLM truncates at ~**256 word-pieces**. The current small chunks (LLM
+  semantic ~1–3 sentences; deterministic `TARGET_CHUNK_CHARS = 400`, hard cap 1000) stay
+  comfortably under that limit, so the old "tail of an 800-char chunk silently dropped"
+  problem no longer applies.
 
 ### What chunks answer a question (`query_service.py` → `vector_repo.search`)
 1. Embed the question (with recent user turns prepended for follow-ups — "2d" enrichment).
-2. `vector_repo.search(query_embedding, top_k=8)` (`query_service.py:488`) — PQ approximate
+2. `vector_repo.search(query_embedding, top_k=8)` (`query_service.py:342`) — PQ approximate
    index if trained, else exact pgvector cosine; **filtered to `status='approved'` only**;
    returns up to 8 `(chunk, entry, similarity)` where `similarity = 1 − cosine_distance`.
-3. Filter by **`RELEVANCE_THRESHOLD = 0.35`** (`query_service.py:349`). ⚠️ **Doc/code
-   drift**: this section previously claimed `0.30`, but the code is **0.35**. Survivors
-   become `knowledge_context`; zero survivors → the no-RAG `_classify_and_route` path.
+3. Filter by **`RELEVANCE_THRESHOLD = 0.45`** (`query_service.py:351`). Raised from the
+   earlier 0.30/0.35 once self-contained semantic chunks pushed correct-chunk similarities
+   higher. Survivors become `knowledge_context`; zero survivors → the no-RAG
+   `_classify_and_route` path.
 4. Each survivor is rendered as `[Entry id | Topic | SME | Relevance] <chunk_text>` and
    that is what the LLM (and the verification layer) see.
 
-### Diagnosed retrieval failures (MediSync benchmark, 20-entry seed, 2026-06-02)
+### Diagnosed retrieval failures (MediSync benchmark, 20-entry seed, 2026-06-02) — HISTORICAL
+> ⚠️ This subsection describes the **pre-rewrite** behavior (fixed 800-char chunks, 0.35
+> threshold). The chunking rewrite of 2026-06-03 (semantic chunking + self-contained
+> subject-named chunks) and the 0.45 threshold were the response to exactly these failures;
+> see the status block at the end of the section. Kept for the diagnostic record.
+
 Several CAR/RP fails were traced to **fact-bearing chunks being cut at the 0.35 threshold**
 — the data was present and surfaced in top-8, then the filter deleted it before the LLM saw
 it. The model then truthfully said "I don't have that info" and clarified/routed. **These
@@ -335,12 +364,17 @@ Two compounding mechanisms:
 3. **Slot waste**: the same entry recurs across top-8 (Infusion Safety appeared 5× in
    CAR_10's ranking), crowding out other entries.
 
-**Highest-leverage fixes (identified, NOT yet applied):**
-1. Set threshold back to **0.30** (one constant; matches docs). Recovers RP_01 + CAR_10.
-2. **Smaller / structure-aware chunks** (split on sections/bullets, ~300–400 chars or
-   token-based under MiniLM's 256 limit) so a single fact isn't diluted and stays attached
-   to its heading.
-3. **De-dupe by entry in top-k** (group chunks per entry, or raise top_k then collapse).
+**Highest-leverage fixes — STATUS (updated 2026-06-03):**
+1. ~~Set threshold back to 0.30~~ — SUPERSEDED. Instead of lowering, the threshold was
+   **raised to 0.45**: self-contained subject-named chunks lift the correct chunk's
+   similarity above the old dead zone, so a higher floor now trims noise rather than cutting
+   facts.
+2. ✅ **Smaller / structure-aware chunks** — DONE (commit `5639f73`). LLM semantic chunker
+   (~1–3 sentences, subject named in every chunk) with a verbatim fact guard, plus a
+   deterministic `TARGET_CHUNK_CHARS = 400` structure-aware fallback. This directly targets
+   the RP_01/CAR_07/CAR_10 dilution + false-substring failures above.
+3. **De-dupe by entry in top-k** — NOT applied (still `top_k=8` with no per-entry collapse).
+   Lower priority now that semantic chunks are denser and more distinct per fact.
 
 ---
 
