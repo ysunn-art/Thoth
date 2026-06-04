@@ -1,6 +1,14 @@
-import { BookOpen, Clock, MessageSquare, Users } from "lucide-react";
+import {
+  BookOpen,
+  ClipboardCheck,
+  MessageSquare,
+  Mic,
+  Shield,
+  Sparkles,
+  Upload,
+  User,
+} from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { useStats } from "../Layout";
 
 function QuickAction({
   icon,
@@ -29,41 +37,35 @@ function QuickAction({
   );
 }
 
-function StatCard({
+function PortalCard({
   icon,
-  iconBg,
-  value,
-  label,
-  description,
+  title,
+  subtitle,
+  onClick,
 }: {
   icon: React.ReactNode;
-  iconBg: string;
-  value: string;
-  label: string;
-  description: string;
+  title: string;
+  subtitle: string;
+  onClick?: () => void;
 }) {
   return (
-    <div className="flex-1 rounded-lg border border-border p-6">
-      <div className="flex items-center gap-4">
-        <div
-          className={`flex h-12 w-12 items-center justify-center rounded-lg ${iconBg}`}
-        >
-          {icon}
-        </div>
-        <div>
-          <p className="text-2xl font-bold text-neutral-900">{value}</p>
-          <p className="text-sm text-neutral-500">{label}</p>
-        </div>
+    <button
+      onClick={onClick}
+      className="flex flex-col items-start gap-3 rounded-lg border border-border bg-white p-5 text-left transition-colors hover:border-magenta hover:bg-magenta-tint"
+    >
+      <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-magenta-tint text-magenta">
+        {icon}
+      </span>
+      <div>
+        <p className="text-sm font-semibold text-neutral-900">{title}</p>
+        <p className="mt-1 text-xs text-neutral-500">{subtitle}</p>
       </div>
-      <p className="mt-4 text-sm text-neutral-400">{description}</p>
-    </div>
+    </button>
   );
 }
 
 export default function Home() {
-  const { stats } = useStats();
   const navigate = useNavigate();
-  const v = (n: number | undefined) => (stats ? String(n) : "–");
 
   return (
     <main className="flex-1 overflow-y-auto bg-white p-8">
@@ -81,7 +83,7 @@ export default function Home() {
       </section>
 
       {/* Quick actions */}
-      <section className="mt-6 rounded-lg border border-border p-6">
+      <section className="mt-6">
         <h2 className="text-xl font-bold text-neutral-900">Quick Actions</h2>
         <div className="mt-4 flex gap-4">
           <QuickAction
@@ -92,49 +94,61 @@ export default function Home() {
           />
           <QuickAction
             icon={<BookOpen size={32} />}
-            title="SWE Directory"
+            title="SME Directory"
             subtitle="View expertise and reach out directly"
             onClick={() => navigate("/directory")}
           />
         </div>
       </section>
 
-      {/* Stat cards */}
-      <section className="mt-6 flex gap-4">
-        <StatCard
-          icon={<BookOpen size={24} className="text-magenta" />}
-          iconBg="bg-magenta-tint"
-          value={v(stats?.approvedArticles)}
-          label="Approved Articles"
-          description="Verified knowledge entries from subject matter experts"
-        />
-        <StatCard
-          icon={<Users size={24} className="text-magenta" />}
-          iconBg="bg-magenta-tint"
-          value={v(stats?.smeCount)}
-          label="Subject Matter Experts"
-          description="Specialists ready to help with your questions"
-        />
-        <StatCard
-          icon={<Clock size={24} className="text-magenta" />}
-          iconBg="bg-magenta-tint"
-          value={v(stats?.pendingReview)}
-          label="Pending Review"
-          description="Knowledge entries awaiting approval"
-        />
+      {/* SME Portal */}
+      <section className="mt-8">
+        <h2 className="text-xl font-bold text-neutral-900">SME Portal</h2>
+        <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+          <PortalCard
+            icon={<User size={20} />}
+            title="My SME Profile"
+            subtitle="Update your expert profile"
+            onClick={() => navigate("/profile")}
+          />
+          <PortalCard
+            icon={<Mic size={20} />}
+            title="Expert Interview"
+            subtitle="Share your knowledge through structured conversation"
+            onClick={() => navigate("/interview")}
+          />
+          <PortalCard
+            icon={<Upload size={20} />}
+            title="Upload Materials"
+            subtitle="Provide supporting documents and resources"
+            onClick={() => navigate("/materials")}
+          />
+          <PortalCard
+            icon={<Sparkles size={20} />}
+            title="Knowledge Synthesis"
+            subtitle="View all generated knowledge entries"
+            onClick={() => navigate("/synthesis")}
+          />
+          <PortalCard
+            icon={<ClipboardCheck size={20} />}
+            title="Review & Approve"
+            subtitle="Validate synthesized content before publication"
+            onClick={() => navigate("/review")}
+          />
+        </div>
       </section>
 
-      {/* Disclaimer */}
-      <section className="mt-6 rounded-lg border border-[#fff085] bg-[#fefce8] p-6">
-        <h3 className="text-base font-bold text-[#894b00]">
-          Important Disclaimer
-        </h3>
-        <p className="mt-2 text-sm text-[#733e0a]">
-          This system provides information for reference purposes only and does
-          not constitute professional advice. All content is attributed to
-          subject matter experts and should be verified for your specific use
-          case. When in doubt, consult with the relevant specialist directly.
-        </p>
+      {/* Admin Actions */}
+      <section className="mt-8">
+        <h2 className="text-xl font-bold text-neutral-900">Admin Actions</h2>
+        <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+          <PortalCard
+            icon={<Shield size={20} />}
+            title="Admin Dashboard"
+            subtitle="Manage SMEs, approve knowledge entries, and oversee the system"
+            onClick={() => navigate("/admin")}
+          />
+        </div>
       </section>
     </main>
   );
