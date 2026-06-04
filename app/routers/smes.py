@@ -66,7 +66,7 @@ async def update_sme(sme_id: str, data: SMEUpdate, db: AsyncSession = Depends(ge
     return _to_response(sme)
 
 
-@router.post("/smes/{sme_id}/link")
+@router.post("/smes/{sme_id}/link", dependencies=[Depends(require_admin)])
 async def link_user_to_sme(
     sme_id: str,
     db: AsyncSession = Depends(get_db),
