@@ -5,12 +5,18 @@ import {
   Circle,
   ClipboardCheck,
   FileText,
+  Link,
   Mic,
   Sparkles,
+  UserPlus,
   XCircle,
 } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import {
   api,
+  getUser,
+  getToken,
+  setToken,
   type SME,
   type InterviewSummary,
   type MaterialSummary,
@@ -59,8 +65,9 @@ function fmtDate(iso: string) {
 }
 
 export default function KnowledgeSynthesis() {
-  const [smes, setSmes] = useState<SME[]>([]);
+  const navigate = useNavigate();
   const [smeId, setSmeId] = useState("");
+  const [smeName, setSmeName] = useState("");
   const [topic, setTopic] = useState("");
   const [selectedInterviews, setSelectedInterviews] = useState<string[]>([]);
   const [selectedMaterials, setSelectedMaterials] = useState<string[]>([]);
@@ -71,15 +78,40 @@ export default function KnowledgeSynthesis() {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState("");
+  const [noSme, setNoSme] = useState(false);
+  const [allSmes, setAllSmes] = useState<SME[]>([]);
+  const [selectedSmeId, setSelectedSmeId] = useState("");
+  const [linking, setLinking] = useState(false);
 
+  // Auto-detect SME from current user
   useEffect(() => {
-    api
-      .listSmes()
-      .then((res) => {
-        setSmes(res.smes);
-        if (res.smes.length > 0) setSmeId(res.smes[0].sme_id);
-      })
-      .catch(() => {});
+    api.getMe().then((fresh: any) => {
+      const token = getToken();
+      if (token) {
+        setToken(token, {
+          user_id: fresh.id ?? fresh.user_id,
+          email: fresh.email ?? "",
+          is_admin: fresh.is_admin ?? false,
+          is_sme: fresh.is_sme ?? false,
+          sme_id: fresh.sme_id ?? null,
+        });
+      }
+      if (fresh.is_sme && fresh.sme_id) {
+        setSmeId(fresh.sme_id);
+        api.getSme(fresh.sme_id).then((s) => setSmeName(s.name)).catch(() => {});
+        setNoSme(false);
+      } else {
+        setNoSme(true);
+      }
+    }).catch(() => {
+      const user = getUser();
+      if (user?.is_sme && user?.sme_id) {
+        setSmeId(user.sme_id);
+        setNoSme(false);
+      } else {
+        setNoSme(true);
+      }
+    });
     api
       .listKnowledge()
       .then((res) => setEntries(res.entries))
@@ -102,8 +134,29 @@ export default function KnowledgeSynthesis() {
 
   const active = entries.find((e) => e.entry_id === activeId) ?? null;
 
-  const smeName = smes.find((s) => s.sme_id === smeId)?.name ?? "";
   const readyCount = selectedInterviews.length + selectedMaterials.length;
+
+  async function linkToSme() {
+    if (!selectedSmeId) return;
+    setLinking(true);
+    setError("");
+    try {
+      await api.linkToSme(selectedSmeId);
+      const token = getToken();
+      if (token) {
+        const user = getUser()!;
+        setToken(token, { ...user, is_sme: true, sme_id: selectedSmeId });
+      }
+      setSmeId(selectedSmeId);
+      setNoSme(false);
+      const sme = allSmes.find((s) => s.sme_id === selectedSmeId);
+      setSmeName(sme?.name ?? "");
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setLinking(false);
+    }
+  }
 
   async function generateDraft() {
     if (!topic.trim() || !smeId || readyCount === 0) return;
@@ -176,7 +229,59 @@ export default function KnowledgeSynthesis() {
         </div>
       )}
 
-      {view === "list" ? (
+      {noSme ? (
+        <div className="flex flex-1 flex-col items-center justify-center p-8">
+          <div className="flex h-20 w-20 items-center justify-center rounded-full bg-magenta-tint">
+            <UserPlus size={36} className="text-magenta" />
+          </div>
+          <h2 className="mt-6 text-xl font-semibold text-neutral-900">
+            No SME Profile
+          </h2>
+          <p className="mt-2 max-w-md text-center text-sm text-neutral-500">
+            You must be linked to an SME before synthesizing knowledge. Create
+            one or link to an existing SME.
+          </p>
+          <button
+            onClick={() => navigate("/onboarding")}
+            className="mt-4 inline-flex items-center gap-2 rounded-lg bg-magenta px-6 py-3 text-sm font-semibold text-white hover:bg-magenta/90"
+          >
+            <UserPlus size={16} />
+            Create New SME
+          </button>
+          <div className="mt-8 border-t border-border pt-8 w-full max-w-md">
+            <p className="text-sm font-medium text-neutral-700 mb-3 text-center">
+              Or link to an existing SME:
+            </p>
+            <div className="flex gap-2">
+              <select
+                value={selectedSmeId}
+                onChange={(e) => setSelectedSmeId(e.target.value)}
+                className="flex-1 rounded-lg border border-border bg-neutral-50 px-3 py-2 text-sm outline-none focus:border-magenta"
+                onClick={() => {
+                  if (allSmes.length === 0) {
+                    api.listSmes().then((res) => setAllSmes(res.smes)).catch(() => {});
+                  }
+                }}
+              >
+                <option value="">Select an SME...</option>
+                {allSmes.map((s) => (
+                  <option key={s.sme_id} value={s.sme_id}>
+                    {s.name} — {s.specialization}
+                  </option>
+                ))}
+              </select>
+              <button
+                onClick={linkToSme}
+                disabled={!selectedSmeId || linking}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold text-white hover:bg-green-700 disabled:opacity-40"
+              >
+                <Link size={14} />
+                {linking ? "Linking..." : "Link"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : view === "list" ? (
         <>
           <header className="border-b border-border px-8 py-6">
             <h1 className="text-2xl font-semibold text-neutral-900">
@@ -209,17 +314,9 @@ export default function KnowledgeSynthesis() {
                     <span className="text-sm font-medium text-neutral-900">
                       SME
                     </span>
-                    <select
-                      value={smeId}
-                      onChange={(e) => setSmeId(e.target.value)}
-                      className="mt-2 w-full rounded-lg border border-border bg-neutral-50 px-3 py-2 text-sm outline-none focus:border-magenta focus:bg-white"
-                    >
-                      {smes.map((s) => (
-                        <option key={s.sme_id} value={s.sme_id}>
-                          {s.name}
-                        </option>
-                      ))}
-                    </select>
+                    <p className="mt-2 text-sm font-medium text-magenta">
+                      {smeName || smeId}
+                    </p>
                   </label>
 
                   <label className="block">
@@ -376,7 +473,7 @@ export default function KnowledgeSynthesis() {
                               {e.topic}
                             </p>
                             <p className="mt-0.5 truncate text-xs text-neutral-500">
-                              {smes.find((s) => s.sme_id === e.sme_id)?.name ?? e.sme_id}
+                              {e.sme_id === smeId ? smeName : e.sme_id}
                             </p>
                           </div>
                           <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ${meta.bg} ${meta.text}`}>
@@ -419,7 +516,7 @@ export default function KnowledgeSynthesis() {
                   {active.topic}
                 </h1>
                 <p className="mt-1 text-sm text-neutral-500">
-                  {smes.find((s) => s.sme_id === active.sme_id)?.name ?? active.sme_id}{" "}
+                  {active.sme_id === smeId ? smeName : active.sme_id}{" "}
                   · updated {fmtDate(active.updated_at)}
                 </p>
               </div>

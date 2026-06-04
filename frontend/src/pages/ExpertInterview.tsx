@@ -2,14 +2,20 @@ import { useEffect, useState } from "react";
 import {
   CheckCircle2,
   Clock,
+  Link,
   MessageSquare,
   Plus,
   Send,
   Sparkles,
   StopCircle,
+  UserPlus,
 } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import {
   api,
+  getUser,
+  getToken,
+  setToken,
   type SME,
   type InterviewSummary,
   type InterviewTranscript,
@@ -61,29 +67,55 @@ function Bubble({ role, text }: { role: "agent" | "user"; text: string }) {
 }
 
 export default function ExpertInterview() {
-  const [smes, setSmes] = useState<SME[]>([]);
+  const navigate = useNavigate();
   const [smeId, setSmeId] = useState("");
+  const [smeName, setSmeName] = useState("");
   const [interviews, setInterviews] = useState<InterviewSummary[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
-  const [transcript, setTranscript] = useState<InterviewTranscript | null>(
-    null,
-  );
+  const [transcript, setTranscript] = useState<InterviewTranscript | null>(null);
   const [topicDraft, setTopicDraft] = useState("");
   const [replyDraft, setReplyDraft] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
+  const [noSme, setNoSme] = useState(false);
+  const [allSmes, setAllSmes] = useState<SME[]>([]);
+  const [selectedSmeId, setSelectedSmeId] = useState("");
+  const [linking, setLinking] = useState(false);
 
+  // Auto-detect SME from current user
   useEffect(() => {
-    api
-      .listSmes()
-      .then((res) => {
-        setSmes(res.smes);
-        if (res.smes.length > 0) setSmeId(res.smes[0].sme_id);
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
+    api.getMe().then((fresh: any) => {
+      const token = getToken();
+      if (token) {
+        setToken(token, {
+          user_id: fresh.id ?? fresh.user_id,
+          email: fresh.email ?? "",
+          is_admin: fresh.is_admin ?? false,
+          is_sme: fresh.is_sme ?? false,
+          sme_id: fresh.sme_id ?? null,
+        });
+      }
+      if (fresh.is_sme && fresh.sme_id) {
+        setSmeId(fresh.sme_id);
+        // Load SME name for display
+        api.getSme(fresh.sme_id).then((s) => setSmeName(s.name)).catch(() => {});
+        setNoSme(false);
+      } else {
+        setNoSme(true);
+      }
+      setLoading(false);
+    }).catch(() => {
+      const user = getUser();
+      if (user?.is_sme && user?.sme_id) {
+        setSmeId(user.sme_id);
+        setNoSme(false);
+      } else {
+        setNoSme(true);
+      }
+      setLoading(false);
+    });
   }, []);
 
   useEffect(() => {
@@ -192,7 +224,28 @@ export default function ExpertInterview() {
     }
   }
 
-  const smeName = smes.find((s) => s.sme_id === smeId)?.name ?? "";
+  async function linkToSme() {
+    if (!selectedSmeId) return;
+    setLinking(true);
+    setError("");
+    try {
+      await api.linkToSme(selectedSmeId);
+      const token = getToken();
+      if (token) {
+        const user = getUser()!;
+        setToken(token, { ...user, is_sme: true, sme_id: selectedSmeId });
+      }
+      setSmeId(selectedSmeId);
+      setNoSme(false);
+      const sme = allSmes.find((s) => s.sme_id === selectedSmeId);
+      setSmeName(sme?.name ?? "");
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setLinking(false);
+    }
+  }
+
   const isComplete = transcript?.status === "completed";
   const progress = transcript
     ? Math.min(100, Math.round((transcript.turns.length / 4) * 100))
@@ -200,31 +253,76 @@ export default function ExpertInterview() {
 
   return (
     <main className="flex flex-1 flex-col overflow-hidden bg-white">
-      <header className="border-b border-border p-6">
-        <h1 className="text-2xl font-bold text-neutral-900">
-          Expert Interview
-        </h1>
-        <p className="mt-1 text-sm text-neutral-500">
-          Share your expertise through an AI-guided conversation
-        </p>
-        {smes.length > 0 && (
-          <select
-            value={smeId}
-            onChange={(e) => {
-              setSmeId(e.target.value);
-              setActiveId(null);
-              setTranscript(null);
-            }}
-            className="mt-3 rounded-lg border border-border bg-neutral-50 px-3 py-1.5 text-sm outline-none focus:border-magenta"
+      {noSme ? (
+        /* Not an SME — empty state with create/link options */
+        <div className="flex flex-1 flex-col items-center justify-center p-8">
+          <div className="flex h-20 w-20 items-center justify-center rounded-full bg-magenta-tint">
+            <UserPlus size={36} className="text-magenta" />
+          </div>
+          <h2 className="mt-6 text-xl font-semibold text-neutral-900">
+            No SME Profile
+          </h2>
+          <p className="mt-2 max-w-md text-center text-sm text-neutral-500">
+            You must be linked to an SME before running interviews. Create one or
+            link to an existing SME.
+          </p>
+          <button
+            onClick={() => navigate("/onboarding")}
+            className="mt-4 inline-flex items-center gap-2 rounded-lg bg-magenta px-6 py-3 text-sm font-semibold text-white hover:bg-magenta/90"
           >
-            {smes.map((s) => (
-              <option key={s.sme_id} value={s.sme_id}>
-                {s.name}
-              </option>
-            ))}
-          </select>
-        )}
-      </header>
+            <UserPlus size={16} />
+            Create New SME
+          </button>
+
+          <div className="mt-8 border-t border-border pt-8 w-full max-w-md">
+            <p className="text-sm font-medium text-neutral-700 mb-3 text-center">
+              Or link to an existing SME:
+            </p>
+            <div className="flex gap-2">
+              <select
+                value={selectedSmeId}
+                onChange={(e) => setSelectedSmeId(e.target.value)}
+                className="flex-1 rounded-lg border border-border bg-neutral-50 px-3 py-2 text-sm outline-none focus:border-magenta"
+                onClick={() => {
+                  if (allSmes.length === 0) {
+                    api.listSmes().then((res) => setAllSmes(res.smes)).catch(() => {});
+                  }
+                }}
+              >
+                <option value="">Select an SME...</option>
+                {allSmes.map((s) => (
+                  <option key={s.sme_id} value={s.sme_id}>
+                    {s.name} — {s.specialization}
+                  </option>
+                ))}
+              </select>
+              <button
+                onClick={linkToSme}
+                disabled={!selectedSmeId || linking}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold text-white hover:bg-green-700 disabled:opacity-40"
+              >
+                <Link size={14} />
+                {linking ? "Linking..." : "Link"}
+              </button>
+            </div>
+            {error && (
+              <p className="mt-3 text-sm text-red-600 text-center">{error}</p>
+            )}
+          </div>
+        </div>
+      ) : (
+        <>
+          <header className="border-b border-border p-6">
+            <h1 className="text-2xl font-bold text-neutral-900">
+              Expert Interview
+            </h1>
+            <p className="mt-1 text-sm text-neutral-500">
+              Share your expertise through an AI-guided conversation
+            </p>
+            <p className="mt-2 text-sm font-medium text-magenta">
+              Interviewing as: {smeName || "..."}
+            </p>
+          </header>
 
       {error && (
         <div className="mx-6 mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
@@ -466,6 +564,8 @@ export default function ExpertInterview() {
           )}
         </section>
       </div>
+        </>
+      )}
     </main>
   );
 }

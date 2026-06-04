@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { CheckCircle2, FileText, Upload } from "lucide-react";
-import { api, type SME, type MaterialSummary } from "../api/client";
+import { CheckCircle2, FileText, Link, Upload, UserPlus } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { api, getUser, getToken, setToken, type SME, type MaterialSummary } from "../api/client";
 
 const ACCEPT = ".pdf,.txt,.md,text/markdown,text/plain,application/pdf";
 const MAX_BYTES = 10 * 1024 * 1024;
@@ -14,8 +15,9 @@ function fileTypeFromName(name: string): string | null {
 }
 
 export default function UploadMaterials() {
-  const [smes, setSmes] = useState<SME[]>([]);
+  const navigate = useNavigate();
   const [smeId, setSmeId] = useState("");
+  const [smeName, setSmeName] = useState("");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [materials, setMaterials] = useState<MaterialSummary[]>([]);
@@ -24,17 +26,44 @@ export default function UploadMaterials() {
   const [isDragging, setIsDragging] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [noSme, setNoSme] = useState(false);
+  const [allSmes, setAllSmes] = useState<SME[]>([]);
+  const [selectedSmeId, setSelectedSmeId] = useState("");
+  const [linking, setLinking] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
+  // Auto-detect SME from current user
   useEffect(() => {
-    api
-      .listSmes()
-      .then((res) => {
-        setSmes(res.smes);
-        if (res.smes.length > 0) setSmeId(res.smes[0].sme_id);
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
+    api.getMe().then((fresh: any) => {
+      const token = getToken();
+      if (token) {
+        setToken(token, {
+          user_id: fresh.id ?? fresh.user_id,
+          email: fresh.email ?? "",
+          is_admin: fresh.is_admin ?? false,
+          is_sme: fresh.is_sme ?? false,
+          sme_id: fresh.sme_id ?? null,
+        });
+      }
+      if (fresh.is_sme && fresh.sme_id) {
+        setSmeId(fresh.sme_id);
+        api.getSme(fresh.sme_id).then((s) => setSmeName(s.name)).catch(() => {});
+        setNoSme(false);
+      } else {
+        setNoSme(true);
+      }
+      setLoading(false);
+    }).catch(() => {
+      const user = getUser();
+      if (user?.is_sme && user?.sme_id) {
+        setSmeId(user.sme_id);
+        setNoSme(false);
+        setLoading(false);
+      } else {
+        setNoSme(true);
+        setLoading(false);
+      }
+    });
   }, []);
 
   useEffect(() => {
@@ -45,6 +74,28 @@ export default function UploadMaterials() {
       .then((res) => setMaterials(res.materials))
       .catch((e) => setError(e.message));
   }, [smeId]);
+
+  async function linkToSme() {
+    if (!selectedSmeId) return;
+    setLinking(true);
+    setError("");
+    try {
+      await api.linkToSme(selectedSmeId);
+      const token = getToken();
+      if (token) {
+        const user = getUser()!;
+        setToken(token, { ...user, is_sme: true, sme_id: selectedSmeId });
+      }
+      setSmeId(selectedSmeId);
+      setNoSme(false);
+      const sme = allSmes.find((s) => s.sme_id === selectedSmeId);
+      setSmeName(sme?.name ?? "");
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setLinking(false);
+    }
+  }
 
   async function ingest(files: FileList | File[]) {
     let count = 0;
@@ -101,7 +152,61 @@ export default function UploadMaterials() {
         </p>
       </header>
 
-      {(error || success) && (
+      {noSme ? (
+        <div className="flex flex-col items-center justify-center py-12">
+          <div className="flex h-20 w-20 items-center justify-center rounded-full bg-magenta-tint">
+            <UserPlus size={36} className="text-magenta" />
+          </div>
+          <h2 className="mt-6 text-xl font-semibold text-neutral-900">
+            No SME Profile
+          </h2>
+          <p className="mt-2 max-w-md text-center text-sm text-neutral-500">
+            You must be linked to an SME before uploading materials. Create one
+            or link to an existing SME.
+          </p>
+          <button
+            onClick={() => navigate("/onboarding")}
+            className="mt-4 inline-flex items-center gap-2 rounded-lg bg-magenta px-6 py-3 text-sm font-semibold text-white hover:bg-magenta/90"
+          >
+            <UserPlus size={16} />
+            Create New SME
+          </button>
+          <div className="mt-8 border-t border-border pt-8 w-full max-w-md">
+            <p className="text-sm font-medium text-neutral-700 mb-3 text-center">
+              Or link to an existing SME:
+            </p>
+            <div className="flex gap-2">
+              <select
+                value={selectedSmeId}
+                onChange={(e) => setSelectedSmeId(e.target.value)}
+                className="flex-1 rounded-lg border border-border bg-neutral-50 px-3 py-2 text-sm outline-none focus:border-magenta"
+                onClick={() => {
+                  if (allSmes.length === 0) {
+                    api.listSmes().then((res) => setAllSmes(res.smes)).catch(() => {});
+                  }
+                }}
+              >
+                <option value="">Select an SME...</option>
+                {allSmes.map((s) => (
+                  <option key={s.sme_id} value={s.sme_id}>
+                    {s.name} — {s.specialization}
+                  </option>
+                ))}
+              </select>
+              <button
+                onClick={linkToSme}
+                disabled={!selectedSmeId || linking}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold text-white hover:bg-green-700 disabled:opacity-40"
+              >
+                <Link size={14} />
+                {linking ? "Linking..." : "Link"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <>
+          {(error || success) && (
         <div
           className={`mb-4 rounded-lg border p-3 text-sm ${
             error
@@ -119,18 +224,9 @@ export default function UploadMaterials() {
             <label className="text-sm font-medium text-neutral-900">
               SME *
             </label>
-            <select
-              value={smeId}
-              onChange={(e) => setSmeId(e.target.value)}
-              className="mt-2 w-full rounded-lg border border-border bg-neutral-50 px-3 py-2 text-sm text-neutral-900 outline-none focus:border-magenta focus:bg-white"
-              disabled={loading}
-            >
-              {smes.map((s) => (
-                <option key={s.sme_id} value={s.sme_id}>
-                  {s.name}
-                </option>
-              ))}
-            </select>
+            <p className="mt-2 text-sm font-medium text-magenta">
+              {smeName || smeId}
+            </p>
           </div>
 
           <div>
@@ -258,6 +354,8 @@ export default function UploadMaterials() {
           )}
         </div>
       </section>
+        </>
+      )}
     </main>
   );
 }
