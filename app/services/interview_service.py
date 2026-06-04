@@ -1,3 +1,4 @@
+from fastapi import HTTPException
 from app.repositories.interview_repo import InterviewRepository
 from app.repositories.sme_repo import SMERepository
 from app.models.db.interview import Interview
@@ -9,6 +10,7 @@ from app.core.errors import raise_not_found
 from app.core.sanitize import sanitize_input
 
 COMPLETE_SIGNAL = "[INTERVIEW_COMPLETE]"
+MAX_TURNS = 10  # hard cap — forces completion after this many turns
 
 
 class InterviewService:
@@ -37,6 +39,17 @@ class InterviewService:
 
     async def submit_turn(self, interview_id: str, data: TurnCreate) -> tuple[Turn, UsageInfo]:
         interview = await self.get_interview(interview_id)
+
+        # Fix 4: don't allow new turns on a completed interview
+        if interview.status == "completed":
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error": f"Interview '{interview_id}' is already completed",
+                    "code": "INTERVIEW_COMPLETED",
+                },
+            )
+
         prior_turns = await self.repo.get_turns(interview_id)
         turn_number = len(prior_turns) + 1
 
@@ -49,13 +62,35 @@ class InterviewService:
 
         system = (
             f"You are conducting a knowledge elicitation interview with an SME. "
-            f"Topic: {interview.topic}. Ask focused follow-up questions to extract detailed knowledge. "
-            f"When you have enough information, respond with exactly: {COMPLETE_SIGNAL}"
+            f"Topic: {interview.topic}.\n\n"
+            f"RULES:\n"
+            f"- Ask EXACTLY ONE follow-up question per turn. Never bundle multiple "
+            f"questions, never use numbered lists, never use 'and also' / 'additionally'.\n"
+            f"- Keep the question focused and concise (under 30 words).\n"
+            f"- Do not preface with acknowledgements like 'Great answer!' or "
+            f"'Thanks for sharing.' Go straight to the question.\n"
+            f"- When you have enough information, respond with exactly: {COMPLETE_SIGNAL}\n"
+            f"  (no other text, no explanation — just the signal)."
         )
 
-        response_text, usage = await llm_client.complete(system=system, messages=messages, model=MODEL_FAST)
+        # Fix 1: hard cap — after MAX_TURNS, force completion regardless of LLM output.
+        # We still make the LLM call so the SME's last answer gets a closing turn, but
+        # mark complete unconditionally.
+        force_complete = turn_number >= MAX_TURNS
 
-        is_complete = COMPLETE_SIGNAL in response_text
+        response_text, usage = await llm_client.complete(
+            system=system,
+            messages=messages,
+            model=MODEL_FAST,
+            max_tokens=120,
+            temperature=0,
+        )
+
+        # Fix 2: strict signal match — only count COMPLETE_SIGNAL when it stands alone
+        # (after stripping whitespace). This prevents false positives when the LLM
+        # narrates the signal phrase inside a sentence.
+        llm_says_complete = response_text.strip() == COMPLETE_SIGNAL
+        is_complete = llm_says_complete or force_complete
         agent_follow_up = None if is_complete else response_text
 
         turn = Turn(
@@ -72,3 +107,13 @@ class InterviewService:
             await self.repo.update(interview)
 
         return turn, usage
+
+    async def complete_interview(self, interview_id: str) -> Interview:
+        """Fix 3: SME-initiated manual completion. Idempotent — completing an
+        already-completed interview is a no-op (returns the existing record).
+        """
+        interview = await self.get_interview(interview_id)
+        if interview.status != "completed":
+            interview.status = "completed"
+            interview = await self.repo.update(interview)
+        return interview

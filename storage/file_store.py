@@ -19,3 +19,13 @@ def purge_uploads():
     upload_dir = Path(settings.upload_dir)
     if upload_dir.exists():
         shutil.rmtree(upload_dir)
+
+
+def delete_sme_uploads(sme_id: str) -> bool:
+    """Remove the upload directory for a single SME (recursive). No-op if absent.
+    Returns True if a directory was actually removed."""
+    sme_dir = Path(settings.upload_dir) / sme_id
+    if sme_dir.exists():
+        shutil.rmtree(sme_dir)
+        return True
+    return False

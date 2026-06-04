@@ -1,91 +1,86 @@
-import { useRef, useState } from "react";
-import { CheckCircle2, FileText, Upload, X } from "lucide-react";
-
-type Visibility = "internal" | "citable";
-
-interface MaterialItem {
-  id: string;
-  title: string;
-  description: string;
-  fileType: "PDF" | "TXT" | "MD";
-  sizeKB: number;
-  sme: string;
-  visibility: Visibility;
-}
-
-const SMES = [
-  "Dr. Sarah Johnson",
-  "Michael Chen",
-  "Priya Raman",
-];
-
-const INITIAL: MaterialItem[] = [
-  {
-    id: "m1",
-    title: "techin513",
-    description: "",
-    fileType: "PDF",
-    sizeKB: 664.2,
-    sme: "Dr. Sarah Johnson",
-    visibility: "citable",
-  },
-  {
-    id: "m2",
-    title: "HW1 (2)",
-    description: "",
-    fileType: "PDF",
-    sizeKB: 2260,
-    sme: "Dr. Sarah Johnson",
-    visibility: "internal",
-  },
-];
+import { useEffect, useRef, useState } from "react";
+import { CheckCircle2, FileText, Upload } from "lucide-react";
+import { api, type SME, type MaterialSummary } from "../api/client";
 
 const ACCEPT = ".pdf,.txt,.md,text/markdown,text/plain,application/pdf";
 const MAX_BYTES = 10 * 1024 * 1024;
 
-function fmtSize(kb: number) {
-  if (kb >= 1024) return `${(kb / 1024).toFixed(2)} MB`;
-  return `${kb.toFixed(1)} KB`;
-}
-
-function fileTypeFromName(name: string): MaterialItem["fileType"] | null {
+function fileTypeFromName(name: string): string | null {
   const ext = name.toLowerCase().split(".").pop();
-  if (ext === "pdf") return "PDF";
-  if (ext === "txt") return "TXT";
-  if (ext === "md" || ext === "markdown") return "MD";
+  if (ext === "pdf") return "application/pdf";
+  if (ext === "txt") return "text/plain";
+  if (ext === "md" || ext === "markdown") return "text/markdown";
   return null;
 }
 
 export default function UploadMaterials() {
-  const [sme, setSme] = useState(SMES[0]);
+  const [smes, setSmes] = useState<SME[]>([]);
+  const [smeId, setSmeId] = useState("");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [visibility, setVisibility] = useState<Visibility>("citable");
-  const [items, setItems] = useState<MaterialItem[]>(INITIAL);
+  const [materials, setMaterials] = useState<MaterialSummary[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [uploading, setUploading] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
 
-  function ingest(files: FileList | File[]) {
-    const next: MaterialItem[] = [];
+  useEffect(() => {
+    api
+      .listSmes()
+      .then((res) => {
+        setSmes(res.smes);
+        if (res.smes.length > 0) setSmeId(res.smes[0].sme_id);
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => {
+    if (!smeId) return;
+    setError("");
+    api
+      .listMaterials(smeId)
+      .then((res) => setMaterials(res.materials))
+      .catch((e) => setError(e.message));
+  }, [smeId]);
+
+  async function ingest(files: FileList | File[]) {
+    let count = 0;
+    setUploading(true);
+    setError("");
+    setSuccess("");
     for (const f of Array.from(files)) {
       const ft = fileTypeFromName(f.name);
-      if (!ft) continue;
-      if (f.size > MAX_BYTES) continue;
-      next.push({
-        id: `m_${Math.random().toString(36).slice(2, 8)}`,
-        title: title.trim() || f.name,
-        description: description.trim(),
-        fileType: ft,
-        sizeKB: f.size / 1024,
-        sme,
-        visibility,
-      });
+      if (!ft) {
+        setError(`Unsupported file type: ${f.name}. Accepted: PDF, TXT, MD`);
+        continue;
+      }
+      if (f.size > MAX_BYTES) {
+        setError(`File too large: ${f.name} (max 10 MB)`);
+        continue;
+      }
+      try {
+        await api.uploadMaterial(
+          smeId,
+          f,
+          title.trim() || f.name,
+          description.trim() || undefined,
+        );
+        count++;
+      } catch (e: any) {
+        setError(e.message);
+      }
     }
-    if (next.length) {
-      setItems([...next, ...items]);
+    if (count > 0) {
+      setSuccess(`Uploaded ${count} file${count > 1 ? "s" : ""}`);
       setTitle("");
       setDescription("");
+      const res = await api.listMaterials(smeId);
+      setMaterials(res.materials);
     }
+    setUploading(false);
   }
 
   function onDrop(e: React.DragEvent<HTMLDivElement>) {
@@ -94,36 +89,45 @@ export default function UploadMaterials() {
     if (e.dataTransfer.files.length) ingest(e.dataTransfer.files);
   }
 
-  function removeItem(id: string) {
-    setItems(items.filter((i) => i.id !== id));
-  }
-
   return (
     <main className="flex-1 overflow-y-auto bg-white p-8">
-      {/* Header */}
       <header className="mb-6">
-        <h1 className="text-2xl font-medium text-neutral-900">Material Ingestion</h1>
+        <h1 className="text-2xl font-medium text-neutral-900">
+          Material Ingestion
+        </h1>
         <p className="mt-1 text-base text-neutral-500">
           Upload PDF, TXT, or Markdown files (max 10 MB each) to enrich the
           knowledge base.
         </p>
       </header>
 
-      {/* Form */}
+      {(error || success) && (
+        <div
+          className={`mb-4 rounded-lg border p-3 text-sm ${
+            error
+              ? "border-red-200 bg-red-50 text-red-800"
+              : "border-green-200 bg-green-50 text-green-800"
+          }`}
+        >
+          {error || success}
+        </div>
+      )}
+
       <section className="rounded-lg border border-border bg-white p-5">
-        <div className="grid grid-cols-1 gap-5 md:grid-cols-2 lg:grid-cols-4">
+        <div className="grid grid-cols-1 gap-5 md:grid-cols-3">
           <div>
             <label className="text-sm font-medium text-neutral-900">
-              SME <span className="text-magenta">*</span>
+              SME *
             </label>
             <select
-              value={sme}
-              onChange={(e) => setSme(e.target.value)}
+              value={smeId}
+              onChange={(e) => setSmeId(e.target.value)}
               className="mt-2 w-full rounded-lg border border-border bg-neutral-50 px-3 py-2 text-sm text-neutral-900 outline-none focus:border-magenta focus:bg-white"
+              disabled={loading}
             >
-              {SMES.map((s) => (
-                <option key={s} value={s}>
-                  {s}
+              {smes.map((s) => (
+                <option key={s.sme_id} value={s.sme_id}>
+                  {s.name}
                 </option>
               ))}
             </select>
@@ -152,47 +156,9 @@ export default function UploadMaterials() {
               className="mt-2 w-full rounded-lg border border-border bg-neutral-50 px-3 py-2 text-sm text-neutral-900 outline-none placeholder:text-neutral-400 focus:border-magenta focus:bg-white"
             />
           </div>
-
-          <div>
-            <label className="text-sm font-medium text-neutral-900">
-              Visibility <span className="text-magenta">*</span>
-              <span className="ml-1 text-xs font-normal text-neutral-500">
-                (who can see this as a cited source)
-              </span>
-            </label>
-            <div className="mt-2 grid grid-cols-2 gap-2">
-              <button
-                onClick={() => setVisibility("internal")}
-                className={`rounded-lg border px-3 py-2 text-left text-xs font-medium transition-colors ${
-                  visibility === "internal"
-                    ? "border-yellow-400 bg-yellow-50 text-yellow-900"
-                    : "border-border bg-neutral-50 text-neutral-500 hover:border-yellow-300"
-                }`}
-              >
-                Internal only
-                <p className="mt-0.5 text-[10px] font-medium opacity-80">
-                  Used by SMEs &amp; synthesis; never cited to end users.
-                </p>
-              </button>
-              <button
-                onClick={() => setVisibility("citable")}
-                className={`rounded-lg border px-3 py-2 text-left text-xs font-medium transition-colors ${
-                  visibility === "citable"
-                    ? "border-green-500 bg-green-50 text-green-900"
-                    : "border-border bg-neutral-50 text-neutral-500 hover:border-green-400"
-                }`}
-              >
-                Citable to users
-                <p className="mt-0.5 text-[10px] font-medium opacity-80">
-                  May be shown as a source in Ask Thoth answers.
-                </p>
-              </button>
-            </div>
-          </div>
         </div>
       </section>
 
-      {/* Drop zone */}
       <section className="mt-6">
         <div
           onDragOver={(e) => {
@@ -218,6 +184,9 @@ export default function UploadMaterials() {
             Accepted: <span className="font-medium">PDF · TXT · Markdown</span>{" "}
             · Max <span className="font-medium">10 MB</span> per file
           </p>
+          {uploading && (
+            <p className="mt-2 text-sm text-magenta">Uploading...</p>
+          )}
           <input
             ref={fileRef}
             type="file"
@@ -229,75 +198,66 @@ export default function UploadMaterials() {
         </div>
       </section>
 
-      {/* Uploads list */}
       <section className="mt-6">
         <h2 className="text-lg font-medium text-neutral-900">
-          Uploads ({items.length})
+          Uploads ({materials.length})
         </h2>
         <div className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-2">
-          {items.map((m) => (
-            <UploadCard key={m.id} item={m} onRemove={() => removeItem(m.id)} />
+          {materials.map((m) => (
+            <div
+              key={m.material_id}
+              className="rounded-lg border border-green-300 bg-white p-4"
+            >
+              <div className="flex items-start gap-3">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-red-50">
+                  <FileText size={20} className="text-red-500" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-base font-medium text-neutral-900">
+                    {m.title}
+                  </p>
+                  <div className="mt-2 flex flex-wrap items-center gap-2 text-[10px]">
+                    <span className="rounded bg-red-100 px-1.5 py-0.5 font-medium text-red-800">
+                      {m.file_type}
+                    </span>
+                    <span
+                      className={`rounded px-1.5 py-0.5 font-medium ${
+                        m.status === "processed"
+                          ? "bg-green-100 text-green-800"
+                          : m.status === "failed"
+                            ? "bg-red-100 text-red-800"
+                            : "bg-yellow-100 text-yellow-800"
+                      }`}
+                    >
+                      {m.status === "processed" ? (
+                        <>
+                          <CheckCircle2
+                            size={10}
+                            className="mr-1 inline"
+                          />
+                          Processed
+                        </>
+                      ) : m.status === "failed" ? (
+                        "Failed"
+                      ) : (
+                        "Processing"
+                      )}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-xs text-neutral-400">
+                    {m.material_id}
+                  </p>
+                </div>
+              </div>
+            </div>
           ))}
+          {!loading && materials.length === 0 && (
+            <p className="text-sm text-neutral-400">
+              No materials uploaded for this SME yet.
+            </p>
+          )}
         </div>
       </section>
     </main>
-  );
-}
-
-function UploadCard({
-  item,
-  onRemove,
-}: {
-  item: MaterialItem;
-  onRemove: () => void;
-}) {
-  return (
-    <div className="rounded-lg border border-green-300 bg-white p-4">
-      <div className="flex items-start gap-3">
-        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-red-50">
-          <FileText size={20} className="text-red-500" />
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="flex items-start justify-between gap-2">
-            <p className="truncate text-base font-medium text-neutral-900">
-              {item.title}
-            </p>
-            <button
-              onClick={onRemove}
-              aria-label="Remove upload"
-              className="flex h-7 w-7 items-center justify-center rounded text-neutral-400 hover:bg-muted hover:text-neutral-700"
-            >
-              <X size={14} />
-            </button>
-          </div>
-          <p className="mt-0.5 truncate text-xs italic text-neutral-400">
-            {item.description || "No description"}
-          </p>
-          <div className="mt-2 flex flex-wrap items-center gap-2 text-[10px]">
-            <span className="rounded bg-red-100 px-1.5 py-0.5 font-medium text-red-800">
-              {item.fileType}
-            </span>
-            <span className="text-neutral-500">{fmtSize(item.sizeKB)}</span>
-            <span className="text-neutral-500">· {item.sme}</span>
-            {item.visibility === "citable" ? (
-              <span className="rounded bg-green-100 px-1.5 py-0.5 font-medium text-green-800">
-                Citable
-              </span>
-            ) : (
-              <span className="rounded bg-yellow-100 px-1.5 py-0.5 font-medium text-yellow-800">
-                Internal
-              </span>
-            )}
-            <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 font-medium text-green-800">
-              <CheckCircle2 size={10} /> Processed
-            </span>
-          </div>
-          <div className="mt-2 flex items-center gap-1.5 text-[11px] text-green-700">
-            <CheckCircle2 size={12} />
-            Ready to cite in knowledge entries
-          </div>
-        </div>
-      </div>
-    </div>
   );
 }

@@ -18,5 +18,12 @@ class SMEResponse(BaseModel):
     created_at: str
 
 
+class SMEUpdate(BaseModel):
+    name: str
+    specialization: str
+    sub_areas: List[str]
+    contact_email: str
+
+
 class SMEListResponse(BaseModel):
     smes: List[SMEResponse]

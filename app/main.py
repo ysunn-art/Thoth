@@ -3,7 +3,8 @@ import time
 import uuid
 from datetime import datetime, timezone
 from fastapi import FastAPI, Request
-from app.routers import smes, interviews, materials, knowledge, query, system, auth
+from fastapi.middleware.cors import CORSMiddleware
+from app.routers import smes, interviews, materials, knowledge, query, system, auth, sessions
 
 logging.basicConfig(
     level=logging.INFO,
@@ -12,6 +13,14 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Thoth Benchmark API", version="1.0.0")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 PREFIX = "/api/v1"
 
@@ -38,6 +47,7 @@ app.include_router(materials.router, prefix=PREFIX)
 app.include_router(knowledge.router, prefix=PREFIX)
 app.include_router(query.router, prefix=PREFIX)
 app.include_router(system.router, prefix=PREFIX)
+app.include_router(sessions.router, prefix=PREFIX)
 
 
 @app.get("/health")

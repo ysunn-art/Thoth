@@ -1,46 +1,23 @@
-import { useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
+import type { DashboardStats } from "../api/client";
+import { getUser, logout } from "../api/client";
+import { getSessions, timeAgo } from "../api/chatHistory";
 import {
   Activity,
   BookOpen,
   CheckCircle2,
-  ChevronDown,
   ClipboardCheck,
   Clock,
   Info,
+  LogOut,
   MessageSquare,
   Mic,
-  Send,
+  Plus,
   Sparkles,
   Upload,
   User,
   UserPlus,
 } from "lucide-react";
-import { useLocation, useNavigate } from "react-router-dom";
-import type { DashboardStats } from "../api/client";
-
-const CONVERSATIONS = [
-  {
-    id: "c1",
-    title: "5G handoff failure root-cause",
-    preview: "Looking at the latest network logs, the handoff failures appear to…",
-    timestamp: "2m ago",
-    messages: 8,
-  },
-  {
-    id: "c2",
-    title: "Billing dispute escalation policy",
-    preview: "What is the proper escalation path when a customer disputes…",
-    timestamp: "1h ago",
-    messages: 5,
-  },
-  {
-    id: "c3",
-    title: "SIM swap fraud signals",
-    preview: "Which signals should trigger an automatic SIM swap freeze?",
-    timestamp: "Yesterday",
-    messages: 12,
-  },
-];
 
 function NavCard({
   icon,
@@ -93,74 +70,13 @@ function NavLink({
   );
 }
 
-function ChatHistoryExpandable() {
+function ChatHistory() {
   const navigate = useNavigate();
-  const [open, setOpen] = useState(false);
+  const sessions = getSessions();
 
   return (
     <div className="rounded-lg border border-border bg-white">
-      <button
-        onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center justify-between px-4 py-3 text-left transition-colors hover:bg-magenta-tint/40"
-        aria-expanded={open}
-      >
-        <div className="flex items-center gap-2">
-          <Clock size={16} className="text-magenta" />
-          <span className="text-sm font-semibold text-neutral-900">
-            Chat History
-          </span>
-        </div>
-        <ChevronDown
-          size={16}
-          className={`text-neutral-500 transition-transform duration-200 ${
-            open ? "rotate-180" : ""
-          }`}
-        />
-      </button>
-      <p className="px-4 pb-3 text-xs text-neutral-400">
-        {CONVERSATIONS.length} conversations
-      </p>
-
-      <div
-        className={`grid transition-all duration-300 ease-out ${
-          open ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"
-        }`}
-      >
-        <div className="overflow-hidden">
-          <div className="max-h-64 overflow-y-auto border-t border-border p-2">
-            {CONVERSATIONS.map((c, i) => (
-              <button
-                key={c.id}
-                onClick={() => navigate("/chat")}
-                className="block w-full rounded-md border border-transparent p-2 text-left transition-colors hover:border-magenta hover:bg-magenta-tint"
-                style={{ transitionDelay: open ? `${i * 40}ms` : "0ms" }}
-              >
-                <p className="line-clamp-1 text-sm font-medium text-neutral-900">
-                  {c.title}
-                </p>
-                <p className="line-clamp-1 text-xs text-neutral-400">
-                  {c.preview}
-                </p>
-                <div className="mt-1 flex items-center gap-2 text-[10px] text-neutral-400">
-                  <MessageSquare size={10} />
-                  <span>{c.messages} messages</span>
-                  <span>·</span>
-                  <span>{c.timestamp}</span>
-                </div>
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function ChatHistoryActive() {
-  const navigate = useNavigate();
-  return (
-    <div className="rounded-lg border border-border bg-white">
-      <div className="flex items-center justify-between px-4 py-3">
+      <div className="flex items-center justify-between border-b border-border px-4 py-3">
         <div className="flex items-center gap-2">
           <Clock size={16} className="text-magenta" />
           <span className="text-sm font-semibold text-neutral-900">
@@ -168,39 +84,52 @@ function ChatHistoryActive() {
           </span>
         </div>
         <button
-          className="flex h-8 w-8 items-center justify-center rounded-md hover:bg-muted"
+          onClick={() => navigate("/chat")}
+          className="flex h-7 w-7 items-center justify-center rounded-md hover:bg-muted"
           aria-label="New conversation"
         >
-          <Send size={14} className="text-neutral-500" />
+          <Plus size={14} className="text-neutral-500" />
         </button>
       </div>
-      <p className="px-4 pb-2 text-xs text-neutral-400">
-        {CONVERSATIONS.length} conversations
-      </p>
-      <div className="max-h-72 overflow-y-auto border-t border-border p-2">
-        {CONVERSATIONS.map((c, i) => (
+      {sessions.length === 0 ? (
+        <div className="p-2">
           <button
-            key={c.id}
             onClick={() => navigate("/chat")}
-            className={`mb-1 block w-full rounded-md border px-3 py-2 text-left transition-colors ${
-              i === 0
-                ? "border-magenta/30 bg-magenta-tint"
-                : "border-transparent hover:border-magenta hover:bg-magenta-tint"
-            }`}
+            className="w-full rounded-md border border-border p-3 text-left transition-colors hover:border-magenta hover:bg-magenta-tint"
           >
-            <p className="line-clamp-1 text-sm font-medium text-neutral-900">
-              {c.title}
+            <p className="text-sm font-semibold text-neutral-900">
+              New Conversation
             </p>
-            <p className="line-clamp-1 text-xs text-neutral-500">{c.preview}</p>
-            <div className="mt-1 flex items-center gap-2 text-[10px] text-neutral-400">
-              <MessageSquare size={10} />
-              <span>{c.messages} messages</span>
-              <span>·</span>
-              <span>{c.timestamp}</span>
-            </div>
+            <p className="text-xs text-neutral-400">Start a new Q&A session</p>
           </button>
-        ))}
-      </div>
+        </div>
+      ) : (
+        <>
+          <p className="px-4 pb-2 pt-1 text-xs text-neutral-400">
+            {sessions.length} conversation{sessions.length !== 1 ? "s" : ""}
+          </p>
+          <div className="max-h-56 overflow-y-auto border-t border-border p-2">
+            {sessions.slice(0, 10).map((s) => (
+              <button
+                key={s.id}
+                onClick={() => navigate(`/chat?session=${s.id}`)}
+                className="mb-1 block w-full rounded-md border border-transparent px-3 py-2 text-left transition-colors hover:border-magenta hover:bg-magenta-tint"
+              >
+                <p className="line-clamp-1 text-sm font-medium text-neutral-900">
+                  {s.title}
+                </p>
+                <p className="line-clamp-1 text-xs text-neutral-400">
+                  {s.lastMessage}
+                </p>
+                <div className="mt-1 flex items-center gap-1 text-[10px] text-neutral-400">
+                  <MessageSquare size={10} />
+                  <span>{timeAgo(s.updatedAt)}</span>
+                </div>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -288,6 +217,7 @@ export default function Sidebar({ stats }: { stats: DashboardStats | null }) {
   const navigate = useNavigate();
   const location = useLocation();
   const isChat = location.pathname.startsWith("/chat");
+  const user = getUser();
 
   return (
     <aside className="flex h-full w-80 flex-col gap-4 overflow-y-auto border-r border-border p-5">
@@ -296,9 +226,7 @@ export default function Sidebar({ stats }: { stats: DashboardStats | null }) {
         onClick={() => navigate("/")}
         className="flex items-center gap-3 pb-2 text-left"
       >
-        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-magenta text-lg font-bold text-white">
-          T
-        </div>
+        <img src="/Tmobile_LOGO.png" alt="T-Mobile" className="h-8 w-auto" />
         <div>
           <p className="text-base font-bold leading-tight text-neutral-900">
             Project Thoth
@@ -324,91 +252,114 @@ export default function Sidebar({ stats }: { stats: DashboardStats | null }) {
         />
       )}
 
-      {isChat ? <ChatHistoryActive /> : <ChatHistoryExpandable />}
+      <ChatHistory />
 
       {isChat ? (
         <SystemStatus stats={stats} />
       ) : (
         <>
-          {/* SME Tools section */}
-          <div>
-            <p className="mb-2 px-1 text-xs font-semibold uppercase tracking-wide text-neutral-400">
-              SME Tools
-            </p>
-            <div className="flex flex-col gap-3">
-              <NavLink
-                icon={<User size={16} />}
-                label="My SME Profile"
-                onClick={() => navigate("/profile")}
-              />
-              <NavLink
-                icon={<Mic size={16} />}
-                label="Expert Interview"
-                onClick={() => navigate("/interview")}
-              />
-              <NavLink
-                icon={<Upload size={16} />}
-                label="Upload Materials"
-                onClick={() => navigate("/materials")}
-              />
-              <NavLink
-                icon={<Sparkles size={16} />}
-                label="Knowledge Synthesis"
-                onClick={() => navigate("/synthesis")}
-              />
-              <NavLink
-                icon={<ClipboardCheck size={16} />}
-                label="Review & Approve"
-                onClick={() => navigate("/review")}
-              />
+          {/* SME Tools section — visible to SME and Admin */}
+          {(user?.is_sme || user?.is_admin) && (
+            <div>
+              <p className="mb-2 px-1 text-xs font-semibold uppercase tracking-wide text-neutral-400">
+                SME Tools
+              </p>
+              <div className="flex flex-col gap-3">
+                <NavLink
+                  icon={<User size={16} />}
+                  label="My SME Profile"
+                  onClick={() => navigate("/profile")}
+                />
+                <NavLink
+                  icon={<Mic size={16} />}
+                  label="Expert Interview"
+                  onClick={() => navigate("/interview")}
+                />
+                <NavLink
+                  icon={<Upload size={16} />}
+                  label="Upload Materials"
+                  onClick={() => navigate("/materials")}
+                />
+                <NavLink
+                  icon={<Sparkles size={16} />}
+                  label="Knowledge Synthesis"
+                  onClick={() => navigate("/synthesis")}
+                />
+                <NavLink
+                  icon={<ClipboardCheck size={16} />}
+                  label="Review & Approve"
+                  onClick={() => navigate("/review")}
+                />
+              </div>
             </div>
-          </div>
+          )}
 
-          {/* Admin Tools section */}
-          <div>
-            <p className="mb-2 px-1 text-xs font-semibold uppercase tracking-wide text-neutral-400">
-              Admin Tools
-            </p>
-            <div className="flex flex-col gap-3">
-              <NavLink
-                icon={<UserPlus size={16} />}
-                label="SME Onboarding"
-                onClick={() => navigate("/onboarding")}
-              />
-              <NavLink
-                icon={<Activity size={16} />}
-                label="Admin Dashboard"
-                onClick={() => navigate("/admin")}
-              />
+          {/* Admin Tools section — visible to Admin only */}
+          {user?.is_admin && (
+            <div>
+              <p className="mb-2 px-1 text-xs font-semibold uppercase tracking-wide text-neutral-400">
+                Admin Tools
+              </p>
+              <div className="flex flex-col gap-3">
+                <NavLink
+                  icon={<UserPlus size={16} />}
+                  label="SME Onboarding"
+                  onClick={() => navigate("/onboarding")}
+                />
+                <NavLink
+                  icon={<Activity size={16} />}
+                  label="Admin Dashboard"
+                  onClick={() => navigate("/admin")}
+                />
+              </div>
             </div>
-          </div>
+          )}
         </>
       )}
 
-      {/* Role badge */}
-      {isChat ? (
-        <div className="mt-auto flex items-center gap-2 rounded-md bg-magenta-tint px-3 py-2">
-          <CheckCircle2 size={12} className="text-magenta" />
-          <div>
-            <p className="text-xs font-semibold text-neutral-900">Admin</p>
-            <p className="text-[10px] text-neutral-500">Administrator access</p>
-          </div>
-        </div>
-      ) : (
-        <div className="mt-auto rounded-lg border border-border bg-magenta-tint p-3">
-          <div className="flex items-center gap-2">
-            <div className="flex h-7 w-7 items-center justify-center rounded-full bg-magenta text-white">
-              <CheckCircle2 size={14} />
+      {/* User badge */}
+      {(() => {
+        if (!user) {
+          return (
+            <div className="mt-auto flex items-center gap-2 border-t border-border pt-3">
+              <User size={14} className="text-neutral-400" />
+              <div>
+                <p className="text-xs font-semibold text-neutral-700">Not logged in</p>
+                <p className="text-[10px] text-neutral-400">Please sign in</p>
+              </div>
             </div>
-            <div>
-              <p className="text-xs font-semibold text-neutral-900">
-                Admin
-              </p>
-              <p className="text-[10px] text-neutral-500">Administrator access</p>
+          );
+        }
+        return (
+          <div className="mt-auto flex flex-col gap-2 border-t border-border pt-3">
+            <div className="flex items-center gap-2 rounded-md bg-magenta-tint px-3 py-2">
+              <CheckCircle2 size={12} className="text-magenta" />
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-xs font-semibold text-neutral-900">
+                  {user.email}
+                </p>
+                <p className="text-[10px] text-neutral-500">
+                  {user.is_admin
+                    ? "Administrator access"
+                    : user.is_sme
+                      ? "SME access"
+                      : "User access"}
+                </p>
+              </div>
             </div>
+            <button
+              onClick={() => {
+                logout();
+                navigate("/login");
+              }}
+              className="flex w-full items-center justify-center gap-1.5 rounded-md border border-border bg-white px-3 py-1.5 text-xs font-medium text-neutral-500 transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-600"
+            >
+              <LogOut size={12} />
+              Sign out
+            </button>
           </div>
-        </div>
-      )}
+        );
+      })()}
     </aside>
   );
 }

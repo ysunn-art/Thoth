@@ -29,3 +29,9 @@ class MaterialRepository:
     async def delete_all(self):
         await self.db.execute(delete(Material))
         await self.db.commit()
+
+    async def delete_by_sme(self, sme_id: str) -> int:
+        """Delete all materials belonging to an SME (DB rows only — caller wipes the disk)."""
+        result = await self.db.execute(delete(Material).where(Material.sme_id == sme_id))
+        await self.db.commit()
+        return result.rowcount or 0

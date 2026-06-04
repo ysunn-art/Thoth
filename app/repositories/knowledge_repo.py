@@ -34,3 +34,18 @@ class KnowledgeRepository:
     async def delete_all(self):
         await self.db.execute(delete(KnowledgeEntry))
         await self.db.commit()
+
+    async def list_ids_by_sme(self, sme_id: str) -> list[str]:
+        result = await self.db.execute(
+            select(KnowledgeEntry.id).where(KnowledgeEntry.sme_id == sme_id)
+        )
+        return [row[0] for row in result.all()]
+
+    async def delete_by_sme(self, sme_id: str) -> int:
+        """Delete all knowledge entries for an SME. knowledge_chunks rows cascade via
+        ON DELETE CASCADE; the in-memory PQ index is cleaned per-entry by the caller."""
+        result = await self.db.execute(
+            delete(KnowledgeEntry).where(KnowledgeEntry.sme_id == sme_id)
+        )
+        await self.db.commit()
+        return result.rowcount or 0

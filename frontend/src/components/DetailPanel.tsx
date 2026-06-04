@@ -9,14 +9,15 @@ import {
 } from "lucide-react";
 
 export interface SourceItem {
+  entry_id?: string;
   title: string;
-  score: number; // 0-100
+  score?: number;
 }
 
 export interface ExpertItem {
   name: string;
   specialization: string;
-  match: number; // 0-100
+  match?: number;
   lastReview?: string;
 }
 
@@ -25,7 +26,7 @@ export interface AnswerDetail {
   updatedAt: string;
   answer: string;
   relatedTopics: string[];
-  confidence: number; // 0-100
+  confidence?: number;
   sources: SourceItem[];
   experts: ExpertItem[];
 }
@@ -66,7 +67,6 @@ export default function DetailPanel({
 }) {
   return (
     <section className="flex h-full w-[44%] min-w-[420px] flex-col border-l border-border bg-white">
-      {/* Header */}
       <div className="flex items-center justify-between border-b border-border px-5 py-3">
         <div className="flex items-center gap-2">
           <button onClick={onClose} className="rounded-md p-1 hover:bg-muted">
@@ -101,7 +101,6 @@ export default function DetailPanel({
       </div>
 
       <div className="flex-1 overflow-y-auto p-5">
-        {/* Answer card */}
         <div className="rounded-lg border border-border p-5">
           <p className="whitespace-pre-wrap text-sm leading-relaxed text-neutral-700">
             {detail.answer}
@@ -125,85 +124,104 @@ export default function DetailPanel({
           )}
         </div>
 
-        {/* Confidence + sources + experts */}
         <div className="mt-5 grid grid-cols-3 gap-5 rounded-lg border border-border p-5">
-          {/* Confidence */}
-          <div>
-            <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-neutral-400">
-              Answer Confidence
-            </p>
-            <div className="flex flex-col items-center">
-              <ConfidenceDonut value={detail.confidence} />
-              <span className="mt-2 text-sm font-semibold text-green-600">
-                {detail.confidence >= 80
-                  ? "High Confidence"
-                  : detail.confidence >= 50
-                    ? "Medium Confidence"
-                    : "Low Confidence"}
-              </span>
+          {detail.confidence != null ? (
+            <div>
+              <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-neutral-400">
+                Answer Confidence
+              </p>
+              <div className="flex flex-col items-center">
+                <ConfidenceDonut value={detail.confidence} />
+                <span className="mt-2 text-sm font-semibold text-green-600">
+                  {detail.confidence >= 80
+                    ? "High Confidence"
+                    : detail.confidence >= 50
+                      ? "Medium Confidence"
+                      : "Low Confidence"}
+                </span>
+              </div>
             </div>
-          </div>
+          ) : (
+            <div>
+              <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-neutral-400">
+                Answer Confidence
+              </p>
+              <p className="text-sm text-neutral-400">Not available</p>
+            </div>
+          )}
 
-          {/* Top sources */}
           <div>
             <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-neutral-400">
               Top Sources
             </p>
             <div className="flex flex-col gap-3">
-              {detail.sources.map((s) => (
-                <div key={s.title}>
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="flex items-center gap-1 truncate text-xs text-neutral-700">
-                      <FileText size={12} className="shrink-0 text-magenta" />
-                      <span className="truncate">{s.title}</span>
-                    </span>
-                    <span className="shrink-0 text-xs font-semibold text-neutral-500">
-                      {s.score}%
-                    </span>
+              {detail.sources.length === 0 ? (
+                <p className="text-sm text-neutral-400">No sources cited</p>
+              ) : (
+                detail.sources.map((s) => (
+                  <div key={`${s.entry_id ?? s.title}`}>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="flex items-center gap-1 truncate text-xs text-neutral-700">
+                        <FileText size={12} className="shrink-0 text-magenta" />
+                        <span className="truncate">{s.title}</span>
+                      </span>
+                      {s.score != null && (
+                        <span className="shrink-0 text-xs font-semibold text-neutral-500">
+                          {s.score}%
+                        </span>
+                      )}
+                    </div>
+                    {s.score != null && (
+                      <div className="mt-1 h-1.5 w-full rounded-full bg-muted">
+                        <div
+                          className="h-1.5 rounded-full bg-magenta"
+                          style={{ width: `${s.score}%` }}
+                        />
+                      </div>
+                    )}
                   </div>
-                  <div className="mt-1 h-1.5 w-full rounded-full bg-muted">
-                    <div
-                      className="h-1.5 rounded-full bg-magenta"
-                      style={{ width: `${s.score}%` }}
-                    />
-                  </div>
-                </div>
-              ))}
+                ))
+              )}
             </div>
           </div>
 
-          {/* Relevant experts */}
           <div>
             <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-neutral-400">
               Relevant Experts
             </p>
-            {detail.experts.map((e) => (
-              <div key={e.name} className="mb-3">
-                <div className="flex items-center justify-between">
-                  <span className="flex items-center gap-2">
-                    <span className="flex h-7 w-7 items-center justify-center rounded-full bg-magenta-tint">
-                      <User size={14} className="text-magenta" />
-                    </span>
-                    <span>
-                      <span className="block text-xs font-semibold text-neutral-900">
-                        {e.name}
+            {detail.experts.length === 0 ? (
+              <p className="text-sm text-neutral-400">No experts matched</p>
+            ) : (
+              detail.experts.map((e) => (
+                <div key={e.name} className="mb-3">
+                  <div className="flex items-center justify-between">
+                    <span className="flex items-center gap-2">
+                      <span className="flex h-7 w-7 items-center justify-center rounded-full bg-magenta-tint">
+                        <User size={14} className="text-magenta" />
                       </span>
-                      <span className="block text-[10px] text-neutral-400">
-                        {e.specialization}
+                      <span>
+                        <span className="block text-xs font-semibold text-neutral-900">
+                          {e.name}
+                        </span>
+                        <span className="block text-[10px] text-neutral-400">
+                          {e.specialization}
+                        </span>
                       </span>
                     </span>
-                  </span>
-                  <span className="text-xs font-semibold text-green-600">
-                    {e.match}%
-                  </span>
+                    {e.match != null && (
+                      <span className="text-xs font-semibold text-green-600">
+                        {e.match}%
+                      </span>
+                    )}
+                  </div>
+                  {e.lastReview && (
+                    <p className="mt-1 text-[10px] text-neutral-400">
+                      Latest Review {e.lastReview}
+                    </p>
+                  )}
                 </div>
-                {e.lastReview && (
-                  <p className="mt-1 text-[10px] text-neutral-400">
-                    Latest Review {e.lastReview}
-                  </p>
-                )}
-              </div>
-            ))}
+              ))
+            )}
             <button className="mt-1 flex w-full items-center justify-center gap-1 rounded-md bg-magenta px-3 py-2 text-xs font-semibold text-white hover:opacity-90">
               <ArrowUpRight size={14} />
               Escalate to Advisor

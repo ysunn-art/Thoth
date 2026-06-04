@@ -28,20 +28,11 @@ def _to_response(user: User) -> UserResponse:
 
 @router.post("/auth/register", status_code=201, response_model=UserResponse)
 async def register(data: UserCreate, db: AsyncSession = Depends(get_db)):
-    """Open registration for regular users. Creating an admin or SME-linked user
-    requires the caller to already be an admin (or use the service token)."""
-    if data.is_admin or data.is_sme:
-        try:
-            from fastapi.security import HTTPBearer
-            # We need to enforce admin caller for elevated registrations.
-            # Easiest path: pull caller via a separate dependency-injected route.
-            pass
-        except Exception:
-            pass
-    # Elevated registration check is delegated to the dedicated endpoint below.
-    if data.is_admin or data.is_sme:
+    """Open registration. Admins are gated via the elevated endpoint below.
+    SME users are auto-linked by matching registration email to SME contact_email."""
+    if data.is_admin:
         raise_forbidden(
-            "Use POST /auth/register/elevated (admin-only) to create admin or SME-linked users"
+            "Use POST /auth/register/elevated (admin-only) to create admin users"
         )
     service = AuthService(UserRepository(db), SMERepository(db))
     user = await service.register(data)

@@ -47,3 +47,16 @@ class InterviewRepository:
         await self.db.execute(delete(Turn))
         await self.db.execute(delete(Interview))
         await self.db.commit()
+
+    async def delete_by_sme(self, sme_id: str) -> int:
+        """Delete all interviews (and their turns) belonging to an SME. Returns count."""
+        ids_result = await self.db.execute(
+            select(Interview.id).where(Interview.sme_id == sme_id)
+        )
+        ids = [row[0] for row in ids_result.all()]
+        if not ids:
+            return 0
+        await self.db.execute(delete(Turn).where(Turn.interview_id.in_(ids)))
+        await self.db.execute(delete(Interview).where(Interview.id.in_(ids)))
+        await self.db.commit()
+        return len(ids)

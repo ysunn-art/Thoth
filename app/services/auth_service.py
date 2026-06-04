@@ -57,6 +57,14 @@ class AuthService:
                 status_code=409,
                 detail={"error": f"Email '{data.email}' already registered", "code": "EMAIL_TAKEN"},
             )
+
+        # Auto-link to SME by matching contact_email
+        if not data.is_sme and not data.sme_id:
+            sme = await self.sme_repo.get_by_contact_email(data.email)
+            if sme:
+                data.is_sme = True
+                data.sme_id = sme.id
+
         if data.is_sme:
             if not data.sme_id:
                 raise HTTPException(

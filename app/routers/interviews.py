@@ -100,6 +100,25 @@ async def submit_turn(
     return _turn_response(turn, usage)
 
 
+@router.post("/interviews/{interview_id}/complete", response_model=InterviewResponse)
+async def complete_interview(
+    interview_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+):
+    """SME-initiated manual completion. The SME (or admin) marks the interview
+    as completed without going through another LLM turn. Idempotent."""
+    interview = await InterviewRepository(db).get_by_id(interview_id)
+    if not interview:
+        raise_not_found("Interview", interview_id)
+    if not user.is_admin and not (user.is_sme and user.sme_id == interview.sme_id):
+        raise_forbidden(f"Not allowed to act on interview '{interview_id}'")
+
+    service = InterviewService(InterviewRepository(db), SMERepository(db))
+    interview = await service.complete_interview(interview_id)
+    return _interview_response(interview)
+
+
 @router.get("/interviews/{interview_id}", response_model=InterviewTranscript)
 async def get_interview(interview_id: str, db: AsyncSession = Depends(get_db)):
     service = InterviewService(InterviewRepository(db), SMERepository(db))

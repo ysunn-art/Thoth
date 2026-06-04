@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   CheckCircle2,
   Clock,
@@ -6,92 +6,165 @@ import {
   Plus,
   Send,
   Sparkles,
-  User,
+  StopCircle,
 } from "lucide-react";
-
-type InterviewStatus = "in_progress" | "completed";
-
-interface Turn {
-  role: "agent" | "user";
-  text: string;
-}
-
-interface Interview {
-  id: string;
-  topic: string;
-  status: InterviewStatus;
-  startedAt: string;
-  turns: Turn[];
-  progress: number; // 0..100
-}
-
-const FOLLOW_UPS = [
-  "What is the topic you would like to share knowledge about?",
-  "What are the best practices you recommend?",
-  "Are there any critical considerations or warnings to be aware of?",
-  "Can you provide a specific example or case study?",
-];
+import {
+  api,
+  type SME,
+  type InterviewSummary,
+  type InterviewTranscript,
+  type TurnResponse,
+} from "../api/client";
 
 function fmtDate(iso: string) {
   const d = new Date(iso);
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  return d.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+function Bubble({ role, text }: { role: "agent" | "user"; text: string }) {
+  if (role === "agent") {
+    return (
+      <div className="flex items-start gap-3">
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-magenta-tint">
+          <Sparkles size={14} className="text-magenta" />
+        </div>
+        <div className="flex-1">
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-magenta">
+            AI Agent
+          </p>
+          <div className="mt-1 inline-block rounded-2xl border border-border bg-white px-4 py-2.5 text-sm text-neutral-900">
+            {text}
+          </div>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="flex items-start justify-end gap-3">
+      <div className="max-w-md text-right">
+        <p className="text-[10px] font-semibold uppercase tracking-wide text-neutral-500">
+          You
+        </p>
+        <div className="mt-1 inline-block rounded-2xl bg-magenta px-4 py-2.5 text-left text-sm text-white">
+          {text}
+        </div>
+      </div>
+      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted">
+        <MessageSquare size={14} className="text-neutral-500" />
+      </div>
+    </div>
+  );
 }
 
 export default function ExpertInterview() {
-  const [interviews, setInterviews] = useState<Interview[]>([]);
+  const [smes, setSmes] = useState<SME[]>([]);
+  const [smeId, setSmeId] = useState("");
+  const [interviews, setInterviews] = useState<InterviewSummary[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
-  const [showForm, setShowForm] = useState(false);
+  const [transcript, setTranscript] = useState<InterviewTranscript | null>(
+    null,
+  );
   const [topicDraft, setTopicDraft] = useState("");
   const [replyDraft, setReplyDraft] = useState("");
+  const [showForm, setShowForm] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState("");
 
-  const active = interviews.find((i) => i.id === activeId) ?? null;
+  useEffect(() => {
+    api
+      .listSmes()
+      .then((res) => {
+        setSmes(res.smes);
+        if (res.smes.length > 0) setSmeId(res.smes[0].sme_id);
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
 
-  function startInterview() {
-    const topic = topicDraft.trim();
-    if (!topic) return;
-    const id = `int_${Math.random().toString(36).slice(2, 8)}`;
-    const newInterview: Interview = {
-      id,
-      topic,
-      status: "in_progress",
-      startedAt: new Date().toISOString(),
-      turns: [{ role: "agent", text: FOLLOW_UPS[0] }],
-      progress: 0,
-    };
-    setInterviews([newInterview, ...interviews]);
-    setActiveId(id);
-    setShowForm(false);
-    setTopicDraft("");
+  useEffect(() => {
+    if (!smeId) return;
+    api
+      .getSmeInterviews(smeId)
+      .then((res) => setInterviews(res.interviews))
+      .catch((e) => setError(e.message));
+  }, [smeId]);
+
+  async function loadTranscript(interviewId: string) {
+    try {
+      const t = await api.getInterview(interviewId);
+      setTranscript(t);
+      setActiveId(interviewId);
+      setShowForm(false);
+    } catch (e: any) {
+      setError(e.message);
+    }
   }
 
-  function sendReply() {
-    if (!active) return;
+  async function startInterview() {
+    const topic = topicDraft.trim();
+    if (!topic || !smeId) return;
+    setError("");
+    try {
+      const interview = await api.createInterview(smeId, topic);
+      setInterviews((prev) => [
+        {
+          interview_id: interview.interview_id,
+          topic: interview.topic,
+          status: interview.status,
+          created_at: interview.created_at,
+        },
+        ...prev,
+      ]);
+      setActiveId(interview.interview_id);
+      setShowForm(false);
+      setTopicDraft("");
+      setTranscript({
+        interview_id: interview.interview_id,
+        sme_id: smeId,
+        topic: interview.topic,
+        status: "in_progress",
+        turns: [],
+      });
+    } catch (e: any) {
+      setError(e.message);
+    }
+  }
+
+  async function sendReply() {
+    if (!activeId || !transcript) return;
     const reply = replyDraft.trim();
     if (!reply) return;
-
-    setInterviews((prev) =>
-      prev.map((i) => {
-        if (i.id !== active.id) return i;
-        const newTurns: Turn[] = [...i.turns, { role: "user", text: reply }];
-        const agentTurnsSoFar = newTurns.filter((t) => t.role === "agent").length;
-        const nextQuestion = FOLLOW_UPS[agentTurnsSoFar];
-        if (nextQuestion) {
-          newTurns.push({ role: "agent", text: nextQuestion });
-        }
-        const completed = !nextQuestion;
-        const progress = Math.min(
-          100,
-          Math.round((agentTurnsSoFar / FOLLOW_UPS.length) * 100),
+    setSending(true);
+    setError("");
+    try {
+      const turn: TurnResponse = await api.submitTurn(activeId, reply);
+      const updatedTurns = [
+        ...transcript.turns,
+        { turn_number: turn.turn_number, sme_response: turn.sme_response, agent_follow_up: turn.agent_follow_up, timestamp: turn.timestamp },
+      ];
+      setTranscript({
+        ...transcript,
+        status: turn.agent_follow_up === null ? "completed" : "in_progress",
+        turns: updatedTurns,
+      });
+      if (turn.agent_follow_up === null) {
+        setInterviews((prev) =>
+          prev.map((i) =>
+            i.interview_id === activeId ? { ...i, status: "completed" } : i,
+          ),
         );
-        return {
-          ...i,
-          turns: newTurns,
-          status: completed ? "completed" : "in_progress",
-          progress: completed ? 100 : progress,
-        };
-      }),
-    );
-    setReplyDraft("");
+      }
+      setReplyDraft("");
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setSending(false);
+    }
   }
 
   function onReplyKey(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -101,25 +174,75 @@ export default function ExpertInterview() {
     }
   }
 
+  async function endInterview() {
+    if (!activeId) return;
+    setError("");
+    try {
+      await api.completeInterview(activeId);
+      if (transcript) {
+        setTranscript({ ...transcript, status: "completed" });
+      }
+      setInterviews((prev) =>
+        prev.map((i) =>
+          i.interview_id === activeId ? { ...i, status: "completed" } : i,
+        ),
+      );
+    } catch (e: any) {
+      setError(e.message);
+    }
+  }
+
+  const smeName = smes.find((s) => s.sme_id === smeId)?.name ?? "";
+  const isComplete = transcript?.status === "completed";
+  const progress = transcript
+    ? Math.min(100, Math.round((transcript.turns.length / 4) * 100))
+    : 0;
+
   return (
     <main className="flex flex-1 flex-col overflow-hidden bg-white">
-      {/* Header */}
       <header className="border-b border-border p-6">
-        <h1 className="text-2xl font-bold text-neutral-900">Expert Interview</h1>
+        <h1 className="text-2xl font-bold text-neutral-900">
+          Expert Interview
+        </h1>
         <p className="mt-1 text-sm text-neutral-500">
           Share your expertise through an AI-guided conversation
         </p>
+        {smes.length > 0 && (
+          <select
+            value={smeId}
+            onChange={(e) => {
+              setSmeId(e.target.value);
+              setActiveId(null);
+              setTranscript(null);
+            }}
+            className="mt-3 rounded-lg border border-border bg-neutral-50 px-3 py-1.5 text-sm outline-none focus:border-magenta"
+          >
+            {smes.map((s) => (
+              <option key={s.sme_id} value={s.sme_id}>
+                {s.name}
+              </option>
+            ))}
+          </select>
+        )}
       </header>
 
+      {error && (
+        <div className="mx-6 mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+          {error}
+        </div>
+      )}
+
       <div className="flex flex-1 overflow-hidden">
-        {/* Interviews list */}
         <section className="flex w-72 flex-col border-r border-border">
           <div className="flex items-center justify-between border-b border-border p-4">
-            <h2 className="text-sm font-semibold text-neutral-900">Interviews</h2>
+            <h2 className="text-sm font-semibold text-neutral-900">
+              Interviews
+            </h2>
             <button
               onClick={() => {
                 setShowForm(true);
                 setActiveId(null);
+                setTranscript(null);
               }}
               className="flex items-center gap-1 rounded-md bg-magenta px-3 py-1.5 text-xs font-semibold text-white hover:bg-magenta/90"
             >
@@ -127,7 +250,9 @@ export default function ExpertInterview() {
             </button>
           </div>
 
-          {interviews.length === 0 ? (
+          {loading ? (
+            <p className="p-4 text-sm text-neutral-400">Loading...</p>
+          ) : interviews.length === 0 ? (
             <div className="flex flex-1 flex-col items-center justify-center px-6 text-center">
               <MessageSquare
                 size={32}
@@ -143,13 +268,10 @@ export default function ExpertInterview() {
             <div className="flex-1 overflow-y-auto p-3">
               {interviews.map((i) => (
                 <button
-                  key={i.id}
-                  onClick={() => {
-                    setActiveId(i.id);
-                    setShowForm(false);
-                  }}
+                  key={i.interview_id}
+                  onClick={() => loadTranscript(i.interview_id)}
                   className={`mb-2 block w-full rounded-lg border p-3 text-left transition-colors ${
-                    activeId === i.id
+                    activeId === i.interview_id
                       ? "border-magenta bg-magenta-tint"
                       : "border-border hover:border-magenta/40 hover:bg-magenta-tint/40"
                   }`}
@@ -170,7 +292,7 @@ export default function ExpertInterview() {
                       </span>
                     )}
                     <span className="flex items-center gap-1 text-neutral-400">
-                      <Clock size={10} /> {fmtDate(i.startedAt)}
+                      <Clock size={10} /> {fmtDate(i.created_at)}
                     </span>
                   </div>
                 </button>
@@ -179,246 +301,171 @@ export default function ExpertInterview() {
           )}
         </section>
 
-        {/* Right pane */}
         <section className="flex flex-1 flex-col overflow-hidden">
           {showForm ? (
-            <StartForm
-              topic={topicDraft}
-              onChange={setTopicDraft}
-              onBegin={startInterview}
-              onCancel={() => {
-                setShowForm(false);
-                setTopicDraft("");
-              }}
-            />
-          ) : active ? (
-            <ActiveInterview
-              interview={active}
-              replyDraft={replyDraft}
-              onChangeReply={setReplyDraft}
-              onSend={sendReply}
-              onReplyKey={onReplyKey}
-            />
+            <div className="p-6">
+              <h2 className="text-lg font-semibold text-neutral-900">
+                Start New Interview
+              </h2>
+              <p className="mt-1 text-sm text-neutral-500">
+                Choose a topic. The AI agent will begin the conversation with{" "}
+                {smeName || "the selected SME"}.
+              </p>
+              <div className="mt-6 max-w-xl">
+                <label className="text-sm font-medium text-neutral-900">
+                  Interview Topic <span className="text-magenta">*</span>
+                </label>
+                <input
+                  value={topicDraft}
+                  onChange={(e) => setTopicDraft(e.target.value)}
+                  onKeyDown={(e) =>
+                    e.key === "Enter" && topicDraft.trim() && startInterview()
+                  }
+                  placeholder="e.g., 5G Network Security Best Practices"
+                  className="mt-1.5 w-full rounded-lg border border-border bg-neutral-50 px-3 py-2 text-sm text-neutral-900 outline-none transition-colors focus:border-magenta focus:bg-white"
+                  autoFocus
+                />
+                <div className="mt-4 flex gap-2">
+                  <button
+                    disabled={!topicDraft.trim()}
+                    onClick={startInterview}
+                    className="flex items-center gap-2 rounded-md bg-magenta px-4 py-2 text-sm font-semibold text-white hover:bg-magenta/90 disabled:bg-magenta/50"
+                  >
+                    <Sparkles size={14} /> Begin Interview
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowForm(false);
+                      setTopicDraft("");
+                    }}
+                    className="rounded-md border border-border bg-white px-4 py-2 text-sm font-medium text-neutral-700 hover:bg-muted"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : transcript ? (
+            <>
+              <div className="border-b border-border p-6">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <h2 className="text-lg font-semibold text-neutral-900">
+                      {transcript.topic}
+                    </h2>
+                    <p className="text-xs text-neutral-500">
+                      with {smeName} · {transcript.turns.length} turns
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="h-1.5 w-32 overflow-hidden rounded-full bg-muted">
+                      <div
+                        className="h-full rounded-full bg-magenta transition-all duration-500"
+                        style={{ width: `${isComplete ? 100 : progress}%` }}
+                      />
+                    </div>
+                    <span className="text-xs font-medium text-neutral-500">
+                      {isComplete ? 100 : progress}%
+                    </span>
+                  </div>
+                  {!isComplete && (
+                    <button
+                      onClick={endInterview}
+                      className="flex items-center gap-1.5 rounded-md border border-red-200 bg-white px-3 py-1.5 text-xs font-medium text-red-600 transition-colors hover:bg-red-50"
+                    >
+                      <StopCircle size={14} />
+                      End Interview
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-6">
+                <div className="mx-auto flex max-w-3xl flex-col gap-5">
+                  {transcript.turns.flatMap((t) => {
+                    const bubbles: React.ReactNode[] = [
+                      <Bubble key={`${t.turn_number}-sme`} role="user" text={t.sme_response} />,
+                    ];
+                    if (t.agent_follow_up) {
+                      bubbles.push(
+                        <Bubble key={`${t.turn_number}-agent`} role="agent" text={t.agent_follow_up} />,
+                      );
+                    }
+                    return bubbles;
+                  })}
+
+                  {isComplete && (
+                    <div className="rounded-xl border border-green-200 bg-green-50 p-6 text-center">
+                      <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-green-100">
+                        <CheckCircle2 size={22} className="text-green-600" />
+                      </div>
+                      <h3 className="mt-3 text-base font-semibold text-green-900">
+                        Interview complete
+                      </h3>
+                      <p className="mt-1 text-sm text-green-800/90">
+                        The AI agent has no more follow-up questions. Your
+                        transcript has been saved and will be synthesized into a
+                        knowledge entry for review.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {isComplete ? (
+                <div className="border-t border-border bg-neutral-50/60 p-4 text-center text-sm text-neutral-500">
+                  This interview is complete. Start a new one from the left
+                  panel.
+                </div>
+              ) : (
+                <div className="border-t border-border p-4">
+                  <div className="mx-auto flex max-w-3xl items-end gap-2">
+                    <textarea
+                      value={replyDraft}
+                      onChange={(e) => setReplyDraft(e.target.value)}
+                      onKeyDown={onReplyKey}
+                      rows={2}
+                      placeholder="Share your expertise in detail…  (⌘/Ctrl+Enter to send)"
+                      disabled={sending}
+                      className="flex-1 resize-none rounded-lg border border-border bg-neutral-50 px-3 py-2 text-sm text-neutral-900 outline-none transition-colors focus:border-magenta focus:bg-white disabled:opacity-60"
+                    />
+                    <button
+                      onClick={sendReply}
+                      disabled={!replyDraft.trim() || sending}
+                      className={`flex h-10 w-10 items-center justify-center rounded-md text-white transition-colors ${
+                        replyDraft.trim() && !sending
+                          ? "bg-magenta hover:bg-magenta/90"
+                          : "bg-magenta/40"
+                      }`}
+                    >
+                      <Send size={16} />
+                    </button>
+                  </div>
+                </div>
+              )}
+            </>
           ) : (
-            <EmptyState onNew={() => setShowForm(true)} />
+            <div className="flex flex-1 flex-col items-center justify-center px-6 text-center">
+              <div className="flex h-16 w-16 items-center justify-center rounded-full bg-magenta-tint">
+                <Sparkles size={28} className="text-magenta" />
+              </div>
+              <h2 className="mt-4 text-xl font-semibold text-neutral-900">
+                Start a new interview
+              </h2>
+              <p className="mt-2 max-w-md text-sm text-neutral-500">
+                The AI agent will ask follow-up questions and capture your
+                expertise as a structured knowledge entry.
+              </p>
+              <button
+                onClick={() => setShowForm(true)}
+                className="mt-6 flex items-center gap-2 rounded-md bg-magenta px-5 py-3 text-sm font-semibold text-white hover:bg-magenta/90"
+              >
+                <Plus size={16} /> New Interview
+              </button>
+            </div>
           )}
         </section>
       </div>
     </main>
-  );
-}
-
-function EmptyState({ onNew }: { onNew: () => void }) {
-  return (
-    <div className="flex flex-1 flex-col items-center justify-center px-6 text-center">
-      <div className="flex h-16 w-16 items-center justify-center rounded-full bg-magenta-tint">
-        <Sparkles size={28} className="text-magenta" />
-      </div>
-      <h2 className="mt-4 text-xl font-semibold text-neutral-900">
-        Start a new interview
-      </h2>
-      <p className="mt-2 max-w-md text-sm text-neutral-500">
-        The AI agent will ask follow-up questions and capture your expertise as
-        a structured knowledge entry.
-      </p>
-      <button
-        onClick={onNew}
-        className="mt-6 flex items-center gap-2 rounded-md bg-magenta px-5 py-3 text-sm font-semibold text-white hover:bg-magenta/90"
-      >
-        <Plus size={16} /> New Interview
-      </button>
-    </div>
-  );
-}
-
-function StartForm({
-  topic,
-  onChange,
-  onBegin,
-  onCancel,
-}: {
-  topic: string;
-  onChange: (v: string) => void;
-  onBegin: () => void;
-  onCancel: () => void;
-}) {
-  const canBegin = topic.trim().length > 0;
-  return (
-    <div className="p-6">
-      <h2 className="text-lg font-semibold text-neutral-900">
-        Start New Interview
-      </h2>
-      <p className="mt-1 text-sm text-neutral-500">
-        Choose the SME and topic. The AI agent will begin the conversation.
-      </p>
-
-      <div className="mt-6 max-w-xl">
-        <label className="text-sm font-medium text-neutral-900">
-          Interview Topic <span className="text-magenta">*</span>
-        </label>
-        <input
-          value={topic}
-          onChange={(e) => onChange(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && canBegin && onBegin()}
-          placeholder="e.g., 5G Network Security Best Practices"
-          className="mt-1.5 w-full rounded-lg border border-border bg-neutral-50 px-3 py-2 text-sm text-neutral-900 outline-none transition-colors focus:border-magenta focus:bg-white"
-          autoFocus
-        />
-
-        <div className="mt-4 flex gap-2">
-          <button
-            disabled={!canBegin}
-            onClick={onBegin}
-            className={`flex items-center gap-2 rounded-md px-4 py-2 text-sm font-semibold text-white transition-colors ${
-              canBegin ? "bg-magenta hover:bg-magenta/90" : "bg-magenta/50"
-            }`}
-          >
-            <Sparkles size={14} /> Begin Interview
-          </button>
-          <button
-            onClick={onCancel}
-            className="rounded-md border border-border bg-white px-4 py-2 text-sm font-medium text-neutral-700 hover:bg-muted"
-          >
-            Cancel
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function ActiveInterview({
-  interview,
-  replyDraft,
-  onChangeReply,
-  onSend,
-  onReplyKey,
-}: {
-  interview: Interview;
-  replyDraft: string;
-  onChangeReply: (v: string) => void;
-  onSend: () => void;
-  onReplyKey: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
-}) {
-  const isComplete = interview.status === "completed";
-  return (
-    <>
-      {/* Topic header + progress */}
-      <div className="border-b border-border p-6">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h2 className="text-lg font-semibold text-neutral-900">
-              {interview.topic}
-            </h2>
-            <p className="text-xs text-neutral-500">
-              with Dr. Sarah Johnson · started {fmtDate(interview.startedAt)}
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="h-1.5 w-32 overflow-hidden rounded-full bg-muted">
-              <div
-                className="h-full rounded-full bg-magenta transition-all duration-500"
-                style={{ width: `${interview.progress}%` }}
-              />
-            </div>
-            <span className="text-xs font-medium text-neutral-500">
-              {interview.progress}%
-            </span>
-          </div>
-        </div>
-      </div>
-
-      {/* Conversation */}
-      <div className="flex-1 overflow-y-auto p-6">
-        <div className="mx-auto flex max-w-3xl flex-col gap-5">
-          {interview.turns.map((t, i) => (
-            <Bubble key={i} turn={t} />
-          ))}
-
-          {isComplete && (
-            <div className="rounded-xl border border-green-200 bg-green-50 p-6 text-center">
-              <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-green-100">
-                <CheckCircle2 size={22} className="text-green-600" />
-              </div>
-              <h3 className="mt-3 text-base font-semibold text-green-900">
-                Interview complete
-              </h3>
-              <p className="mt-1 text-sm text-green-800/90">
-                The AI agent has no more follow-up questions. Your transcript
-                has been saved and will be synthesized into a knowledge entry
-                for review.
-              </p>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Composer */}
-      {isComplete ? (
-        <div className="border-t border-border bg-neutral-50/60 p-4 text-center text-sm text-neutral-500">
-          This interview is complete. Start a new one from the left panel.
-        </div>
-      ) : (
-        <div className="border-t border-border p-4">
-          <div className="mx-auto flex max-w-3xl items-end gap-2">
-            <textarea
-              value={replyDraft}
-              onChange={(e) => onChangeReply(e.target.value)}
-              onKeyDown={onReplyKey}
-              rows={2}
-              placeholder="Share your expertise in detail…  (⌘/Ctrl+Enter to send)"
-              className="flex-1 resize-none rounded-lg border border-border bg-neutral-50 px-3 py-2 text-sm text-neutral-900 outline-none transition-colors focus:border-magenta focus:bg-white"
-            />
-            <button
-              onClick={onSend}
-              disabled={!replyDraft.trim()}
-              className={`flex h-10 w-10 items-center justify-center rounded-md text-white transition-colors ${
-                replyDraft.trim()
-                  ? "bg-magenta hover:bg-magenta/90"
-                  : "bg-magenta/40"
-              }`}
-              aria-label="Send reply"
-            >
-              <Send size={16} />
-            </button>
-          </div>
-        </div>
-      )}
-    </>
-  );
-}
-
-function Bubble({ turn }: { turn: Turn }) {
-  if (turn.role === "agent") {
-    return (
-      <div className="flex items-start gap-3">
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-magenta-tint">
-          <Sparkles size={14} className="text-magenta" />
-        </div>
-        <div className="flex-1">
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-magenta">
-            AI Agent
-          </p>
-          <div className="mt-1 inline-block rounded-2xl border border-border bg-white px-4 py-2.5 text-sm text-neutral-900">
-            {turn.text}
-          </div>
-        </div>
-      </div>
-    );
-  }
-  return (
-    <div className="flex items-start justify-end gap-3">
-      <div className="max-w-md text-right">
-        <p className="text-[10px] font-semibold uppercase tracking-wide text-neutral-500">
-          You
-        </p>
-        <div className="mt-1 inline-block rounded-2xl bg-magenta px-4 py-2.5 text-left text-sm text-white">
-          {turn.text}
-        </div>
-      </div>
-      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted">
-        <User size={14} className="text-neutral-500" />
-      </div>
-    </div>
   );
 }

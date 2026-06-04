@@ -1,14 +1,20 @@
+import { useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import gsap from "gsap";
 import {
   BookOpen,
   ClipboardCheck,
   MessageSquare,
   Mic,
+  Send,
   Shield,
   Sparkles,
   Upload,
   User,
 } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { getUser } from "../api/client";
+
+// ── Shared helpers ─────────────────────────────────────────────────
 
 function QuickAction({
   icon,
@@ -64,7 +70,9 @@ function PortalCard({
   );
 }
 
-export default function Home() {
+// ── Dashboard home (SME / Admin) ───────────────────────────────────
+
+function DashboardHome() {
   const navigate = useNavigate();
 
   return (
@@ -152,4 +160,107 @@ export default function Home() {
       </section>
     </main>
   );
+}
+
+// ── Normal user home (input that redirects to /chat) ──────────────
+
+const SUGGESTED = [
+  "What are the best practices for network security?",
+  "How does the billing dispute process work?",
+  "What are the SIM swap fraud prevention measures?",
+  "How does the device trade-in program work?",
+];
+
+function NormalUserHome() {
+  const [input, setInput] = useState("");
+  const navigate = useNavigate();
+  const mainRef = useRef<HTMLElement>(null);
+
+  function handleSubmit(q: string) {
+    const trimmed = q.trim();
+    if (!trimmed) return;
+    setInput("");
+    gsap.to(mainRef.current, {
+      opacity: 0,
+      duration: 0.2,
+      ease: "power2.in",
+      onComplete: () => navigate("/chat", { state: { question: trimmed } }),
+    });
+  }
+
+  return (
+    <main ref={mainRef} className="flex flex-1 flex-col bg-white p-8">
+      {/* Welcome banner */}
+      <section className="rounded-lg bg-gradient-to-r from-magenta to-[rgba(226,0,116,0.8)] p-8 text-white">
+        <h1 className="text-3xl font-bold">Welcome to Project Thoth</h1>
+        <p className="mt-2 text-lg font-medium text-white/90">
+          T-Mobile's AI-Powered Knowledge Management System
+        </p>
+        <p className="mt-3 max-w-2xl text-sm text-white/80">
+          Ask anything about T-Mobile systems, policies, and expert knowledge.
+          Thoth will answer from approved knowledge or connect you with the
+          right specialist.
+        </p>
+      </section>
+
+      {/* Central input area */}
+      <div className="flex flex-1 flex-col items-center justify-center gap-6">
+        {/* Suggested questions */}
+        <div className="w-full max-w-2xl">
+          <p className="mb-2 flex items-center gap-1 text-sm text-neutral-500">
+            <Sparkles size={14} className="text-magenta" /> Suggested questions
+          </p>
+          <div className="flex gap-3 overflow-x-auto pb-1">
+            {SUGGESTED.map((q) => (
+              <button
+                key={q}
+                onClick={() => handleSubmit(q)}
+                className="shrink-0 rounded-lg bg-magenta-tint px-4 py-3 text-left text-sm text-neutral-700 hover:bg-[rgba(226,0,116,0.18)]"
+              >
+                {q}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Chat box */}
+        <div className="w-full max-w-2xl">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleSubmit(input);
+            }}
+            className="flex items-center gap-2 rounded-lg border border-border bg-white px-4 py-3 shadow-sm transition-shadow focus-within:border-magenta focus-within:shadow-md"
+          >
+            <input
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              placeholder="Ask me anything about T-Mobile systems and policies..."
+              className="flex-1 bg-transparent py-1 text-base outline-none placeholder:text-neutral-400"
+              autoFocus
+            />
+            <button
+              type="submit"
+              disabled={!input.trim()}
+              className="flex h-10 w-10 items-center justify-center rounded-md bg-magenta text-white transition-opacity hover:opacity-90 disabled:opacity-30"
+            >
+              <Send size={18} />
+            </button>
+          </form>
+          <p className="mt-2 text-center text-[11px] text-neutral-400">
+            Information provided is for reference only and does not constitute
+            professional advice.
+          </p>
+        </div>
+      </div>
+    </main>
+  );
+}
+
+// ── Home (role dispatcher) ─────────────────────────────────────────
+
+export default function Home() {
+  const user = getUser();
+  if (user && !user.is_admin && !user.is_sme) return <NormalUserHome />;
+  return <DashboardHome />;
 }

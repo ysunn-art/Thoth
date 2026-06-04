@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.services.query_service import QueryService, _ADMIN_REFUSAL
 from app.services.llm_client import UsageInfo, MODEL_SMART
+from app.services.session_store import session_store
 
 
 # ---------------------------------------------------------------------------
@@ -55,6 +56,7 @@ def _make_service(sme_repo=None, knowledge_repo=None, vector_repo=None):
         sme_repo=sme_repo or AsyncMock(),
         knowledge_repo=knowledge_repo or AsyncMock(),
         vector_repo=vector_repo or AsyncMock(),
+        session_store=session_store,
     )
 
 
@@ -64,8 +66,8 @@ def _make_service(sme_repo=None, knowledge_repo=None, vector_repo=None):
 @pytest.mark.asyncio
 async def test_guardrail_overrides_routing_when_quality_high():
     """
-    LLM returns 'routing' but max_sim >= 0.45 AND >= 2 relevant chunks.
-    Guardrail MUST fire → second LLM call → final response_type = 'answer'.
+    LLM returns 'routing'. The deterministic guardrail has been removed;
+    the LLM's raw decision passes through unchanged.
     """
     vector_repo = AsyncMock()
     vector_repo.search.return_value = [
@@ -79,43 +81,28 @@ async def test_guardrail_overrides_routing_when_quality_high():
         _sme("sme_1", "Dr. Test", "Software Testing", ["unit testing", "integration testing", "e2e"]),
     ]
 
-    # Call 1: main query LLM → routing (wrong decision, will trigger guardrail)
-    # Call 2: guardrail forced answer
     with patch("app.services.query_service.llm_client") as mock_llm:
         mock_llm.embed_one = AsyncMock(return_value=[0.1] * 384)
-        mock_llm.complete = AsyncMock(side_effect=[
-            (
-                '{"response_type": "routing", "answer": "no knowledge available", '
-                '"grounded": false, "sources": [], '
-                '"routed_to": [{"type": "sme", "sme_name": "Dr. Test", '
-                '"specialization": "Software Testing", "reason": "topic match"}], '
-                '"disclaimer": null}',
-                _usage(200, 80),
-            ),
-            (
-                '{"answer": "Integration testing verifies that combined components '
-                'work correctly together. Use test doubles for isolation.", '
-                '"sources": [{"entry_id": "ke_1", "sme_name": "Dr. Test", '
-                '"topic": "Integration Testing"}, {"entry_id": "ke_2", '
-                '"sme_name": "Dr. Test", "topic": "Unit Testing"}]}',
-                _usage(180, 60),
-            ),
-        ])
+        mock_llm.complete = AsyncMock(return_value=(
+            '{"response_type": "routing", "answer": "no knowledge available", '
+            '"grounded": false, "sources": [], '
+            '"routed_to": [{"type": "sme", "sme_name": "Dr. Test", '
+            '"specialization": "Software Testing", "reason": "topic match"}], '
+            '"disclaimer": null}',
+            _usage(200, 80),
+        ))
 
         service = _make_service(sme_repo=sme_repo, vector_repo=vector_repo)
         result = await service.query("How should I test component integration?", "sess-1")
 
-    assert result.response_type == "answer"
-    assert result.grounded is True
-    assert len(result.sources) >= 1
-    assert result.routed_to is None
-    assert "Integration" in result.answer or "integration" in result.answer.lower()
+    assert result.response_type == "routing"
+    assert result.grounded is False
+    assert len(result.sources) == 0
+    assert result.routed_to is not None
 
-    # Token counts from both LLM calls should be summed
-    # prompt: 200 + 180 = 380, completion: 80 + 60 = 140, total: 280 + 240 = 520
-    assert result.usage.prompt_tokens == 380
-    assert result.usage.completion_tokens == 140
-    assert result.usage.total_tokens == 520
+    assert result.usage.prompt_tokens == 200
+    assert result.usage.completion_tokens == 80
+    assert result.usage.total_tokens == 280
 
 
 # ---------------------------------------------------------------------------
@@ -124,8 +111,8 @@ async def test_guardrail_overrides_routing_when_quality_high():
 @pytest.mark.asyncio
 async def test_guardrail_overrides_clarification_when_quality_high():
     """
-    LLM returns 'clarification' but max_sim >= 0.45 AND >= 2 relevant chunks.
-    Guardrail MUST fire → forced answer.
+    LLM returns 'clarification'. The deterministic guardrail has been removed;
+    the LLM's raw decision passes through unchanged.
     """
     vector_repo = AsyncMock()
     vector_repo.search.return_value = [
@@ -140,29 +127,20 @@ async def test_guardrail_overrides_clarification_when_quality_high():
 
     with patch("app.services.query_service.llm_client") as mock_llm:
         mock_llm.embed_one = AsyncMock(return_value=[0.1] * 384)
-        mock_llm.complete = AsyncMock(side_effect=[
-            (
-                '{"response_type": "clarification", '
-                '"answer": "Do you mean GDPR or CCPA?", '
-                '"grounded": false, "sources": [], "routed_to": null, '
-                '"disclaimer": null}',
-                _usage(150, 30),
-            ),
-            (
-                '{"answer": "GDPR requires clear consent before processing personal data. '
-                'CCPA provides California residents with rights to access and delete their data.", '
-                '"sources": [{"entry_id": "ke_a", "sme_name": "Alice", "topic": "GDPR Compliance"}, '
-                '{"entry_id": "ke_b", "sme_name": "Alice", "topic": "CCPA"}]}',
-                _usage(120, 50),
-            ),
-        ])
+        mock_llm.complete = AsyncMock(return_value=(
+            '{"response_type": "clarification", '
+            '"answer": "Do you mean GDPR or CCPA?", '
+            '"grounded": false, "sources": [], "routed_to": null, '
+            '"disclaimer": null}',
+            _usage(150, 30),
+        ))
 
         service = _make_service(sme_repo=sme_repo, vector_repo=vector_repo)
         result = await service.query("What are data privacy requirements?", "sess-2")
 
-    assert result.response_type == "answer"
-    assert result.grounded is True
-    assert len(result.sources) >= 2
+    assert result.response_type == "clarification"
+    assert result.grounded is False
+    assert len(result.sources) == 0
     assert result.routed_to is None
 
 
@@ -172,8 +150,9 @@ async def test_guardrail_overrides_clarification_when_quality_high():
 @pytest.mark.asyncio
 async def test_guardrail_does_not_trigger_on_low_similarity():
     """
-    max_sim < 0.40 triggers WEAK quality → deterministic clarification,
-    not routing (weak-retrieval guard fires before the LLM is called).
+    max_sim < RELEVANCE_THRESHOLD (0.45) → no relevant chunks → falls into
+    _classify_and_route(). The LLM classifier should return valid JSON with
+    a 'clarify' decision.
     """
     vector_repo = AsyncMock()
     vector_repo.search.return_value = [
@@ -189,7 +168,9 @@ async def test_guardrail_does_not_trigger_on_low_similarity():
     with patch("app.services.query_service.llm_client") as mock_llm:
         mock_llm.embed_one = AsyncMock(return_value=[0.1] * 384)
         mock_llm.complete = AsyncMock(return_value=(
-            "Are you asking about network-level security or application security?",
+            '{"decision": "clarify", '
+            '"clarifying_question": "Are you asking about network-level security or application security?", '
+            '"routed_to": []}',
             _usage(40, 15),
         ))
 
@@ -245,7 +226,8 @@ async def test_guardrail_does_not_trigger_with_one_chunk():
 async def test_deterministic_output_despite_llm_decision_variance():
     """
     Run 3 queries with identical retrieval quality but varying LLM decisions
-    (routing → clarification → routing). The guardrail normalizes ALL to 'answer'.
+    (routing → clarification → routing). Without the guardrail, each query
+    preserves the LLM's raw response_type.
     """
     vector_repo = AsyncMock()
     vector_repo.search.return_value = [
@@ -260,16 +242,8 @@ async def test_deterministic_output_despite_llm_decision_variance():
              ["Kubernetes", "Docker", "Helm", "CI/CD"]),
     ]
 
-    guard_answer = (
-        '{"answer": "Kubernetes orchestrates containerized applications across '
-        'a cluster of nodes, managing scheduling, scaling, and networking.", '
-        '"sources": [{"entry_id": "ke_1", "sme_name": "DevOps Dave", '
-        '"topic": "Kubernetes"}, {"entry_id": "ke_2", "sme_name": "DevOps Dave", '
-        '"topic": "Docker"}]}'
-    )
-
     pattern = [
-        # Query 1: LLM says routing → guardrail fires
+        # Query 1: LLM says routing → preserved as routing
         (
             '{"response_type": "routing", "answer": "no knowledge", '
             '"grounded": false, "sources": [], '
@@ -278,8 +252,7 @@ async def test_deterministic_output_despite_llm_decision_variance():
             '"disclaimer": null}',
             _usage(100, 30),
         ),
-        (guard_answer, _usage(90, 40)),
-        # Query 2: LLM says clarification → guardrail fires
+        # Query 2: LLM says clarification → preserved as clarification
         (
             '{"response_type": "clarification", '
             '"answer": "Do you mean Kubernetes or Docker?", '
@@ -287,8 +260,7 @@ async def test_deterministic_output_despite_llm_decision_variance():
             '"disclaimer": null}',
             _usage(100, 20),
         ),
-        (guard_answer, _usage(90, 40)),
-        # Query 3: LLM says routing → guardrail fires
+        # Query 3: LLM says routing → preserved as routing
         (
             '{"response_type": "routing", "answer": "insufficient info", '
             '"grounded": false, "sources": [], '
@@ -297,7 +269,6 @@ async def test_deterministic_output_despite_llm_decision_variance():
             '"disclaimer": null}',
             _usage(100, 25),
         ),
-        (guard_answer, _usage(90, 40)),
     ]
 
     with patch("app.services.query_service.llm_client") as mock_llm:
@@ -310,13 +281,13 @@ async def test_deterministic_output_despite_llm_decision_variance():
         result2 = await service.query("What does Kubernetes do?", "sess-b")
         result3 = await service.query("What does Kubernetes do?", "sess-c")
 
-    # All three must produce 'answer' — guardrail normalized the variance
-    assert result1.response_type == "answer"
-    assert result2.response_type == "answer"
-    assert result3.response_type == "answer"
-    assert result1.grounded is True
-    assert result2.grounded is True
-    assert result3.grounded is True
+    # Each query preserves the LLM's raw decision
+    assert result1.response_type == "routing"
+    assert result2.response_type == "clarification"
+    assert result3.response_type == "routing"
+    assert result1.grounded is False
+    assert result2.grounded is False
+    assert result3.grounded is False
 
 
 # ---------------------------------------------------------------------------
@@ -538,7 +509,6 @@ async def test_session_history_preserved():
 
         service = _make_service(sme_repo=sme_repo, vector_repo=vector_repo)
 
-        from app.services.session_store import session_store
         session_store.clear_all()
 
         sid = "history-test"
@@ -747,7 +717,7 @@ async def test_critical_risk_self_harm_blocks_before_embedding():
 async def test_high_risk_billing_routes_to_admin_no_llm():
     """
     Tier 2: "how do I get a refund" → admin escalation.
-    embed_one IS called (for vector search), but complete is NOT called.
+    Risk filter blocks at the front gate BEFORE embedding — embed_one is NOT called.
     """
     vector_repo = AsyncMock()
     vector_repo.search.return_value = []
@@ -768,7 +738,7 @@ async def test_high_risk_billing_routes_to_admin_no_llm():
     assert result.routed_to[0].type == "admin"
     assert "billing" in result.routed_to[0].reason
     assert result.grounded is False
-    mock_llm.embed_one.assert_called_once()
+    mock_llm.embed_one.assert_not_called()
     mock_llm.complete.assert_not_called()
 
 
@@ -810,7 +780,7 @@ async def test_definition_question_passes_risk_filter():
 # ---------------------------------------------------------------------------
 @pytest.mark.asyncio
 async def test_high_risk_account_routes_to_admin():
-    """'I forgot my password' → admin. embed_one called, complete NOT called."""
+    """'I forgot my password' → admin. Risk filter blocks at front gate; embed_one NOT called."""
     vector_repo = AsyncMock()
     vector_repo.search.return_value = []
 
@@ -831,7 +801,7 @@ async def test_high_risk_account_routes_to_admin():
     assert result.response_type == "routing"
     assert result.routed_to[0].type == "admin"
     assert "account" in result.routed_to[0].reason
-    mock_llm.embed_one.assert_called_once()
+    mock_llm.embed_one.assert_not_called()
     mock_llm.complete.assert_not_called()
 
 
@@ -990,8 +960,8 @@ async def test_low_risk_common_sense_still_answers():
 @pytest.mark.asyncio
 async def test_high_risk_with_rag_gives_grounded_answer():
     """
-    Option B: "How do I get a refund?" is high-risk billing, BUT RAG has
-    approved refund policy chunks → grounded answer from SME-approved content.
+    Option B REMOVED: "How do I get a refund?" is high-risk billing.
+    ALL risky questions escalate to admin immediately regardless of RAG chunks.
     """
     vector_repo = AsyncMock()
     vector_repo.search.return_value = [
@@ -1009,28 +979,17 @@ async def test_high_risk_with_rag_gives_grounded_answer():
 
     with patch("app.services.query_service.llm_client") as mock_llm:
         mock_llm.embed_one = AsyncMock(return_value=[0.1] * 384)
-        mock_llm.complete = AsyncMock(return_value=(
-            '{"response_type": "answer", '
-            '"answer": "Refunds are processed within 14 business days. '
-            'Contact billing@example.com.", '
-            '"grounded": true, '
-            '"sources": [{"entry_id": "ke_refund", "sme_name": "Policy Admin", '
-            '"topic": "Refund Policy"}], '
-            '"routed_to": null, '
-            '"disclaimer": "This information is based on approved SME knowledge '
-            'and may not constitute professional advice."}',
-            _usage(150, 70),
-        ))
+        mock_llm.complete = AsyncMock(side_effect=RuntimeError("should not be called"))
 
         service = _make_service(sme_repo=sme_repo, vector_repo=vector_repo)
         result = await service.query("How do I get a refund?", "sess-risk-10")
 
-    assert result.response_type == "answer"
-    assert result.grounded is True
-    assert len(result.sources) >= 1
-    assert result.routed_to is None
-    assert "14 business days" in result.answer
-    mock_llm.complete.assert_called_once()
+    assert result.response_type == "routing"
+    assert result.grounded is False
+    assert len(result.sources) == 0
+    assert result.routed_to[0].type == "admin"
+    mock_llm.embed_one.assert_not_called()
+    mock_llm.complete.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

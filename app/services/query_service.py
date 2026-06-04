@@ -5,7 +5,7 @@ from app.repositories.sme_repo import SMERepository
 from app.repositories.knowledge_repo import KnowledgeRepository
 from app.repositories.vector_repo import VectorRepository
 from app.services.llm_client import llm_client, MODEL_SMART
-from app.services.session_store import session_store
+from app.services.session_store import SessionStore
 from app.models.schemas.query import QueryResponse, SourceRef, RoutingTarget, UsageInfo as UsageSchema
 from app.core.sanitize import sanitize_input
 from app.core.risk_filter import check_risk
@@ -19,10 +19,20 @@ _ADMIN_REFUSAL = (
 
 
 class QueryService:
-    def __init__(self, sme_repo: SMERepository, knowledge_repo: KnowledgeRepository, vector_repo: VectorRepository):
+    def __init__(self, sme_repo: SMERepository, knowledge_repo: KnowledgeRepository, vector_repo: VectorRepository, session_store: SessionStore | None = None):
         self.sme_repo = sme_repo
         self.knowledge_repo = knowledge_repo
         self.vector_repo = vector_repo
+        self.session_store = session_store
+
+    async def _history(self, session_id: str):
+        if self.session_store:
+            return await self.session_store.get_history_async(session_id)
+        return []
+
+    async def _append_async(self, session_id: str, role: str, content: str):
+        if self.session_store:
+            await self.session_store.append_async(session_id, role, content)
 
     def _build_admin_escalation(
         self,
@@ -53,7 +63,7 @@ class QueryService:
 
         # Include prior session turns so follow-ups ("what about it?", "what's my name?")
         # have context on this no-RAG path too — the RAG path already injects history.
-        history = session_store.get_history(session_id)
+        history = await self._history(session_id)
         history_text = ""
         if history:
             history_text = "Conversation so far:\n" + "\n".join(
@@ -86,8 +96,8 @@ class QueryService:
                 answer_text = check_parsed.get("answer") or ""
                 if not answer_text:
                     answer_text = question
-                session_store.append(session_id, "user", question)
-                session_store.append(session_id, "assistant", answer_text)
+                await self._append_async(session_id, "user", question)
+                await self._append_async(session_id, "assistant", answer_text)
                 return QueryResponse(
                     answer=answer_text,
                     grounded=False,
@@ -105,8 +115,8 @@ class QueryService:
                     ),
                 )
 
-            session_store.append(session_id, "user", question)
-            session_store.append(session_id, "assistant", _ADMIN_REFUSAL)
+            await self._append_async(session_id, "user", question)
+            await self._append_async(session_id, "assistant", _ADMIN_REFUSAL)
             return self._build_admin_escalation(
                 session_id,
                 "No SMEs are registered and this question requires domain expertise.",
@@ -169,8 +179,8 @@ class QueryService:
 
         if not response_text or not response_text.strip():
             logger.error("llm_empty_response_in_classify prompt_tokens=%d", usage.prompt_tokens)
-            session_store.append(session_id, "user", question)
-            session_store.append(session_id, "assistant", _ADMIN_REFUSAL)
+            await self._append_async(session_id, "user", question)
+            await self._append_async(session_id, "assistant", _ADMIN_REFUSAL)
             return self._build_admin_escalation(
                 session_id,
                 "LLM returned an empty response during classification.",
@@ -220,8 +230,8 @@ class QueryService:
                     usage.completion_tokens += fallback_usage.completion_tokens
                     usage.total_tokens += fallback_usage.total_tokens
 
-            session_store.append(session_id, "user", question)
-            session_store.append(session_id, "assistant", answer_text)
+            await self._append_async(session_id, "user", question)
+            await self._append_async(session_id, "assistant", answer_text)
             return QueryResponse(
                 answer=answer_text,
                 grounded=False,
@@ -241,8 +251,8 @@ class QueryService:
 
         if decision == "clarify" and clarifying_q:
             print(f"[DECISION] classify_has_smes: LLM decided 'clarify' → clarification", flush=True)
-            session_store.append(session_id, "user", question)
-            session_store.append(session_id, "assistant", clarifying_q)
+            await self._append_async(session_id, "user", question)
+            await self._append_async(session_id, "assistant", clarifying_q)
             return QueryResponse(
                 answer=clarifying_q,
                 grounded=False,
@@ -255,11 +265,11 @@ class QueryService:
                 usage=usage_schema,
             )
 
-        session_store.append(session_id, "user", question)
+        await self._append_async(session_id, "user", question)
 
         if not routed_raw:
             print(f"[DECISION] classify_has_smes: LLM decided 'route' with empty routed_to → admin escalation", flush=True)
-            session_store.append(session_id, "assistant", _ADMIN_REFUSAL)
+            await self._append_async(session_id, "assistant", _ADMIN_REFUSAL)
             return self._build_admin_escalation(
                 session_id,
                 "No SME specialization matches this question.",
@@ -291,7 +301,7 @@ class QueryService:
                 f"I recommend consulting: {names}."
             )
 
-        session_store.append(session_id, "assistant", answer)
+        await self._append_async(session_id, "assistant", answer)
         return QueryResponse(
             answer=answer,
             grounded=False,
@@ -323,15 +333,15 @@ class QueryService:
             else:
                 print(f"[DECISION] tier2_risk: BLOCKED ({risk_category}) → admin escalation (no embedding)", flush=True)
                 reason = f"High-risk question ({risk_category}) — requires administrator review."
-            session_store.append(session_id, "user", question)
-            session_store.append(session_id, "assistant", _ADMIN_REFUSAL)
+            await self._append_async(session_id, "user", question)
+            await self._append_async(session_id, "assistant", _ADMIN_REFUSAL)
             return self._build_admin_escalation(session_id, reason)
 
         # 2d: contextualize follow-up turns. A bare follow-up ("I mean the Model X1.")
         # drops the topic keyword, so embedding it alone misses the right chunk. When
         # session history exists, prepend the recent user turn(s) to the embed input
         # only — the LLM prompt below still gets the raw question + full history.
-        history = session_store.get_history(session_id)
+        history = await self._history(session_id)
         embed_text = question
         if history:
             recent_user = [m["content"] for m in history[-3:] if m["role"] == "user"]
@@ -378,7 +388,7 @@ class QueryService:
         num_relevant = len(relevant_chunks)
         logger.info("retrieval_quality max_sim=%.3f num_relevant=%d", max_sim, num_relevant)
 
-        history = session_store.get_history(session_id)
+        history = await self._history(session_id)
         history_text = ""
         if history:
             history_text = "Session history:\n" + "\n".join(
@@ -453,8 +463,8 @@ class QueryService:
         if not response_text or not response_text.strip():
             logger.error("llm_empty_response prompt_tokens=%d completion_tokens=%d",
                          usage.prompt_tokens, usage.completion_tokens)
-            session_store.append(session_id, "user", question)
-            session_store.append(session_id, "assistant", _ADMIN_REFUSAL)
+            await self._append_async(session_id, "user", question)
+            await self._append_async(session_id, "assistant", _ADMIN_REFUSAL)
             return self._build_admin_escalation(
                 session_id,
                 "LLM returned an empty response — unable to process question.",
@@ -483,8 +493,8 @@ class QueryService:
         # and must not override a temp-0 Sonnet decision. With the answer-willing prompt
         # above, the LLM owns answer/clarify/route directly.
 
-        session_store.append(session_id, "user", question)
-        session_store.append(session_id, "assistant", answer)
+        await self._append_async(session_id, "user", question)
+        await self._append_async(session_id, "assistant", answer)
 
         sources = [SourceRef(**s) for s in (parsed.get("sources") or [])]
         routed_to_raw = parsed.get("routed_to")

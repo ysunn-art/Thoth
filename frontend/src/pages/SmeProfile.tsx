@@ -1,17 +1,18 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   AlertTriangle,
   BookOpen,
-  FileText,
+  Link,
   Mail,
   MessageSquare,
   Pencil,
-  Phone,
-  Plus,
   Save,
   User,
+  UserPlus,
   X,
 } from "lucide-react";
+import { useNavigate, useParams } from "react-router-dom";
+import { api, getUser, getToken, setToken, type SME, type KnowledgeEntry } from "../api/client";
 
 const SUGGESTED_AREAS = [
   "5G SA",
@@ -22,77 +23,85 @@ const SUGGESTED_AREAS = [
   "eSIM Provisioning",
 ];
 
-function FieldLabel({ children, required }: { children: React.ReactNode; required?: boolean }) {
-  return (
-    <label className="text-sm font-medium text-neutral-900">
-      {children}
-      {required && <span className="text-magenta">*</span>}
-    </label>
-  );
-}
-
-function Input({
-  icon,
-  value,
-  onChange,
-  className = "",
-}: {
-  icon?: React.ReactNode;
-  value: string;
-  onChange: (v: string) => void;
-  className?: string;
-}) {
-  return (
-    <div className={`relative ${className}`}>
-      {icon && (
-        <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400">
-          {icon}
-        </span>
-      )}
-      <input
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className={`w-full rounded-lg border border-border bg-neutral-50 py-2 text-sm text-neutral-900 outline-none transition-colors focus:border-magenta focus:bg-white ${
-          icon ? "pl-10 pr-3" : "px-3"
-        }`}
-      />
-    </div>
-  );
-}
-
-function StatRow({
-  icon,
-  label,
-  value,
-  valueClass,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  value: string;
-  valueClass?: string;
-}) {
-  return (
-    <div className="flex items-center justify-between rounded-lg bg-neutral-50/60 p-3">
-      <div className="flex items-center gap-2 text-sm text-neutral-500">
-        <span className="text-magenta">{icon}</span>
-        {label}
-      </div>
-      <span className={`text-lg font-bold text-neutral-900 ${valueClass ?? ""}`}>
-        {value}
-      </span>
-    </div>
-  );
-}
-
 export default function SmeProfile() {
-  const [name, setName] = useState("Dr. Sarah Johnson");
-  const [email, setEmail] = useState("sarah.johnson@t-mobile.com");
-  const [phone, setPhone] = useState("555-0101");
-  const [areas, setAreas] = useState<string[]>([
-    "Network Security",
-    "5G Infrastructure",
-  ]);
+  const { smeId } = useParams<{ smeId: string }>();
+  const navigate = useNavigate();
+  const [sme, setSme] = useState<SME | null>(null);
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [areas, setAreas] = useState<string[]>([]);
   const [draftArea, setDraftArea] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState("");
+  const [entries, setEntries] = useState<KnowledgeEntry[]>([]);
+  const [allSmes, setAllSmes] = useState<SME[]>([]);
+  const [selectedSmeId, setSelectedSmeId] = useState("");
+  const [linking, setLinking] = useState(false);
+
+  useEffect(() => {
+    // Sync user info from backend first, THEN decide what to show
+    api.getMe().then((fresh: any) => {
+      const token = getToken();
+      if (token) {
+        setToken(token, {
+          user_id: fresh.id ?? fresh.user_id,
+          email: fresh.email ?? "",
+          is_admin: fresh.is_admin ?? false,
+          is_sme: fresh.is_sme ?? false,
+          sme_id: fresh.sme_id ?? null,
+        });
+      }
+
+      if (!smeId) {
+        // No specific SME in URL — show own profile or empty state
+        if (fresh.is_sme && fresh.sme_id) {
+          navigate(`/profile/${fresh.sme_id}`, { replace: true });
+        } else {
+          setLoading(false);
+        }
+        return;
+      }
+
+      // Specific SME in URL — only the SME owner can see it
+      if (!fresh.is_sme || fresh.sme_id !== smeId) {
+        navigate("/profile", { replace: true });
+        return;
+      }
+
+      loadSme(smeId);
+    }).catch(() => {
+      if (!smeId) {
+        setLoading(false);
+        return;
+      }
+      // Fallback: only allow if user claims ownership via localStorage
+      const user = getUser();
+      if (!user?.is_sme || user.sme_id !== smeId) {
+        navigate("/profile", { replace: true });
+        return;
+      }
+      loadSme(smeId);
+    });
+  }, [smeId, navigate]);
+
+  function loadSme(id: string) {
+    api
+      .getSme(id)
+      .then((s) => {
+        setSme(s);
+        setName(s.name);
+        setEmail(s.contact_email);
+        setAreas(s.sub_areas);
+      })
+      .catch((e) => setError(e.message))
+      .finally(() => setLoading(false));
+    api
+      .listKnowledge()
+      .then((res) => setEntries(res.entries))
+      .catch(() => {});
+  }
 
   const initials = name
     .split(" ")
@@ -115,21 +124,140 @@ export default function SmeProfile() {
     }
   }
 
+  async function saveProfile() {
+    if (!smeId) return;
+    setSaving(true);
+    setError("");
+    setSaved(false);
+    try {
+      const updated = await api.updateSme(smeId, {
+        name: name.trim(),
+        specialization: areas[0] ?? sme?.specialization ?? "",
+        sub_areas: areas,
+        contact_email: email.trim(),
+      });
+      setSme(updated);
+      setSaved(true);
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function linkToSme() {
+    if (!selectedSmeId) return;
+    setLinking(true);
+    setError("");
+    try {
+      await api.linkToSme(selectedSmeId);
+      const token = getToken();
+      if (token) {
+        const user = getUser()!;
+        setToken(token, { ...user, is_sme: true, sme_id: selectedSmeId });
+      }
+      navigate(`/profile/${selectedSmeId}`, { replace: true });
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setLinking(false);
+    }
+  }
+
+  const entryCount = entries.filter((e) => e.sme_id === smeId).length;
+  const liveCount = entries.filter((e) => e.sme_id === smeId && e.status === "approved").length;
+
+  if (loading) {
+    return (
+      <main className="flex-1 overflow-y-auto bg-white p-8">
+        <p className="text-neutral-400">Loading profile...</p>
+      </main>
+    );
+  }
+
+  if (!smeId) {
+    return (
+      <main className="flex flex-1 flex-col items-center justify-center bg-white p-8">
+        <div className="flex h-20 w-20 items-center justify-center rounded-full bg-magenta-tint">
+          <UserPlus size={36} className="text-magenta" />
+        </div>
+        <h2 className="mt-6 text-xl font-semibold text-neutral-900">
+          No SME Profile
+        </h2>
+        <p className="mt-2 text-sm text-neutral-500">
+          You are not linked to any SME yet. Create one or link to an existing
+          SME to manage your expert profile.
+        </p>
+        <button
+          onClick={() => navigate("/onboarding")}
+          className="mt-4 inline-flex items-center gap-2 rounded-lg bg-magenta px-6 py-3 text-sm font-semibold text-white hover:bg-magenta/90"
+        >
+          <UserPlus size={16} />
+          Create New SME
+        </button>
+
+        <div className="mt-8 border-t border-border pt-8 w-full max-w-md">
+          <p className="text-sm font-medium text-neutral-700 mb-3 text-center">
+            Or link to an existing SME:
+          </p>
+          <div className="flex gap-2">
+            <select
+              value={selectedSmeId}
+              onChange={(e) => setSelectedSmeId(e.target.value)}
+              className="flex-1 rounded-lg border border-border bg-neutral-50 px-3 py-2 text-sm outline-none focus:border-magenta"
+              onClick={() => {
+                if (allSmes.length === 0) {
+                  api.listSmes().then((res) => setAllSmes(res.smes)).catch(() => {});
+                }
+              }}
+            >
+              <option value="">Select an SME...</option>
+              {allSmes.map((s) => (
+                <option key={s.sme_id} value={s.sme_id}>
+                  {s.name} — {s.specialization}
+                </option>
+              ))}
+            </select>
+            <button
+              onClick={linkToSme}
+              disabled={!selectedSmeId || linking}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold text-white hover:bg-green-700 disabled:opacity-40"
+            >
+              <Link size={14} />
+              {linking ? "Linking..." : "Link"}
+            </button>
+          </div>
+          {error && (
+            <p className="mt-3 text-sm text-red-600 text-center">{error}</p>
+          )}
+        </div>
+      </main>
+    );
+  }
+
   return (
     <main className="flex-1 overflow-y-auto bg-white p-8">
-      {/* Header */}
       <header className="mb-6">
         <h1 className="text-2xl font-bold text-neutral-900">Update your profile</h1>
         <p className="mt-1 text-sm text-neutral-500">
-          Keep your contact info and areas of expertise current — this is what
-          end users see when their questions get routed to you.
+          Keep your contact info and areas of expertise current.
         </p>
+        {/* Navigate via the Directory page to switch SMEs */}
       </header>
 
+      {error && (
+        <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+          {error}
+        </div>
+      )}
+      {saved && (
+        <div className="mb-4 rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-800">
+          Profile saved successfully.
+        </div>
+      )}
+
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_320px]">
-        {/* Form */}
         <section className="rounded-xl border border-border bg-white p-6">
-          {/* Avatar */}
           <div className="flex items-center gap-4 border-b border-border pb-5">
             <div className="relative">
               <div className="flex h-16 w-16 items-center justify-center rounded-full bg-magenta-tint text-lg font-semibold text-magenta">
@@ -144,49 +272,50 @@ export default function SmeProfile() {
             </div>
             <div>
               <p className="text-base font-semibold text-neutral-900">{name}</p>
-              <p className="text-xs text-neutral-500">SME since May 2026</p>
-            </div>
-          </div>
-
-          {/* Full name */}
-          <div className="mt-5">
-            <FieldLabel required>Full name</FieldLabel>
-            <Input
-              icon={<User size={16} />}
-              value={name}
-              onChange={setName}
-              className="mt-1.5"
-            />
-          </div>
-
-          {/* Email + Phone */}
-          <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-2">
-            <div>
-              <FieldLabel required>Email</FieldLabel>
-              <Input
-                icon={<Mail size={16} />}
-                value={email}
-                onChange={setEmail}
-                className="mt-1.5"
-              />
-            </div>
-            <div>
-              <FieldLabel>Phone</FieldLabel>
-              <Input
-                icon={<Phone size={16} />}
-                value={phone}
-                onChange={setPhone}
-                className="mt-1.5"
-              />
-              <p className="mt-1 text-xs text-neutral-500">
-                Optional — used by admin for urgent escalations
+              <p className="text-xs text-neutral-500">
+                SME since {sme ? new Date(sme.created_at).toLocaleDateString() : "—"}
               </p>
             </div>
           </div>
 
-          {/* Areas of expertise */}
           <div className="mt-5">
-            <FieldLabel required>Areas of expertise</FieldLabel>
+            <label className="text-sm font-medium text-neutral-900">
+              Full name <span className="text-magenta">*</span>
+            </label>
+            <div className="relative mt-1.5">
+              <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400">
+                <User size={16} />
+              </span>
+              <input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                className="w-full rounded-lg border border-border bg-neutral-50 py-2 pl-10 pr-3 text-sm text-neutral-900 outline-none transition-colors focus:border-magenta focus:bg-white"
+              />
+            </div>
+          </div>
+
+          <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-2">
+            <div>
+              <label className="text-sm font-medium text-neutral-900">
+                Email <span className="text-magenta">*</span>
+              </label>
+              <div className="relative mt-1.5">
+                <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400">
+                  <Mail size={16} />
+                </span>
+                <input
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="w-full rounded-lg border border-border bg-neutral-50 py-2 pl-10 pr-3 text-sm text-neutral-900 outline-none transition-colors focus:border-magenta focus:bg-white"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-5">
+            <label className="text-sm font-medium text-neutral-900">
+              Areas of expertise <span className="text-magenta">*</span>
+            </label>
             <div className="mt-1.5 flex min-h-[44px] flex-wrap items-center gap-2 rounded-lg border border-border bg-neutral-50 p-2">
               {areas.map((a) => (
                 <span
@@ -211,63 +340,45 @@ export default function SmeProfile() {
                 className="min-w-32 flex-1 bg-transparent text-sm text-neutral-900 outline-none placeholder:text-neutral-400"
               />
             </div>
-            <div className="mt-2 flex items-center gap-2 text-xs text-neutral-500">
-              <span>{areas.length} areas ·</span>
-              <button
-                onClick={() => setAreas([])}
-                className="font-medium text-magenta hover:underline"
-              >
-                Clear all
-              </button>
-            </div>
             <p className="mt-1 text-xs text-neutral-500">
-              Press Enter or comma to add. These determine which questions get
-              routed to you.
+              Press Enter or comma to add. First area is the primary
+              specialization.
             </p>
           </div>
 
-          {/* Footer */}
           <div className="mt-6 flex items-center justify-between border-t border-border pt-4">
-            <p className="text-xs text-neutral-500">All changes saved</p>
-            <div className="flex gap-2">
-              <button className="rounded-md border border-border bg-white px-4 py-2 text-sm font-medium text-neutral-900 opacity-50">
-                Discard
-              </button>
-              <button className="flex items-center gap-2 rounded-md bg-magenta px-4 py-2 text-sm font-semibold text-white opacity-60">
-                <Save size={16} /> Save changes
-              </button>
-            </div>
+            <p className="text-xs text-neutral-500">Profile ID: {smeId}</p>
+            <button
+              onClick={saveProfile}
+              disabled={saving || !name.trim() || !email.trim()}
+              className="flex items-center gap-2 rounded-md bg-magenta px-4 py-2 text-sm font-semibold text-white hover:bg-magenta/90 disabled:bg-magenta/40"
+            >
+              <Save size={16} /> {saving ? "Saving..." : "Save changes"}
+            </button>
           </div>
         </section>
 
-        {/* Right sidebar */}
         <aside className="flex flex-col gap-4">
-          {/* Your contributions */}
           <div className="rounded-xl border border-border bg-white p-5">
-            <h3 className="text-sm font-semibold text-neutral-900">
-              Your contributions
-            </h3>
+            <h3 className="text-sm font-semibold text-neutral-900">Your contributions</h3>
             <div className="mt-3 flex flex-col gap-2.5">
-              <StatRow
-                icon={<MessageSquare size={16} />}
-                label="Interviews"
-                value="0"
-              />
-              <StatRow
-                icon={<FileText size={16} />}
-                label="Materials"
-                value="0"
-              />
-              <StatRow
-                icon={<BookOpen size={16} />}
-                label="Live entries"
-                value="3"
-                valueClass="text-green-600"
-              />
+              <div className="flex items-center justify-between rounded-lg bg-neutral-50/60 p-3">
+                <div className="flex items-center gap-2 text-sm text-neutral-500">
+                  <MessageSquare size={16} className="text-magenta" />
+                  Entries
+                </div>
+                <span className="text-lg font-bold text-neutral-900">{entryCount}</span>
+              </div>
+              <div className="flex items-center justify-between rounded-lg bg-neutral-50/60 p-3">
+                <div className="flex items-center gap-2 text-sm text-neutral-500">
+                  <BookOpen size={16} className="text-magenta" />
+                  Live entries
+                </div>
+                <span className="text-lg font-bold text-green-600">{liveCount}</span>
+              </div>
             </div>
           </div>
 
-          {/* Why this matters */}
           <div className="rounded-xl border border-yellow-200 bg-yellow-50 p-5">
             <div className="flex items-start gap-2">
               <AlertTriangle size={16} className="mt-0.5 text-yellow-700" />
@@ -282,14 +393,9 @@ export default function SmeProfile() {
             </ul>
           </div>
 
-          {/* Suggested areas */}
           <div className="rounded-xl border border-border bg-white p-5">
-            <h3 className="text-sm font-semibold text-neutral-900">
-              Suggested areas
-            </h3>
-            <p className="mt-1 text-xs text-neutral-500">
-              Common T-Mobile domains. Click to add.
-            </p>
+            <h3 className="text-sm font-semibold text-neutral-900">Suggested areas</h3>
+            <p className="mt-1 text-xs text-neutral-500">Common T-Mobile domains. Click to add.</p>
             <div className="mt-3 flex flex-wrap gap-2">
               {SUGGESTED_AREAS.filter((s) => !areas.includes(s)).map((s) => (
                 <button
@@ -297,7 +403,7 @@ export default function SmeProfile() {
                   onClick={() => addArea(s)}
                   className="inline-flex items-center gap-1 rounded-full border border-dashed border-magenta/40 px-2.5 py-0.5 text-xs font-medium text-magenta transition-colors hover:bg-magenta-tint"
                 >
-                  <Plus size={10} /> {s}
+                  + {s}
                 </button>
               ))}
             </div>

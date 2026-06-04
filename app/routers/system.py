@@ -9,7 +9,8 @@ from app.repositories.interview_repo import InterviewRepository
 from app.repositories.material_repo import MaterialRepository
 from app.repositories.knowledge_repo import KnowledgeRepository
 from app.repositories.vector_repo import VectorRepository
-from app.services.session_store import session_store
+from app.repositories.session_repo import SessionRepository
+from app.services.session_store import SessionStore
 from storage.file_store import purge_uploads
 
 router = APIRouter(dependencies=[Depends(require_admin)])
@@ -21,17 +22,15 @@ async def purge(db: AsyncSession = Depends(get_db)):
     await KnowledgeRepository(db).delete_all()
     await MaterialRepository(db).delete_all()
     await InterviewRepository(db).delete_all()
-    # Users have FK to smes (ON DELETE SET NULL), so delete users first to keep
-    # the chain clean — also resets benchmark state fully.
+    await SessionRepository(db).delete_all()
     await db.execute(delete(User))
     await db.commit()
     await SMERepository(db).delete_all()
-    session_store.clear_all()
     purge_uploads()
     return {"status": "purged", "message": "All data has been deleted"}
 
 
 @router.post("/system/reset")
-async def reset():
-    session_store.clear_all()
+async def reset(db: AsyncSession = Depends(get_db)):
+    await SessionRepository(db).delete_all()
     return {"status": "reset", "message": "Session state cleared"}
