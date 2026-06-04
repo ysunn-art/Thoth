@@ -6,20 +6,72 @@ A FastAPI backend implementing all 8 benchmark capabilities for the T-Mobile Pro
 
 **Stack:** FastAPI · PostgreSQL + pgvector (Docker) · OpenRouter (Claude Haiku 4.5 / Sonnet 4.5) · sentence-transformers (local, 384-dim) · PQ vector index
 
-**Quick start:**
-```bash
-# 1. Start database
-docker start thoth-db   # or: docker run -d --name thoth-db -e POSTGRES_USER=user -e POSTGRES_PASSWORD=pass -e POSTGRES_DB=benchmark_db -p 5432:5432 ankane/pgvector
+## Running locally
 
-# 2. Run migrations
+The app has three parts: a **PostgreSQL + pgvector** database, the **FastAPI backend** (`:8000`), and a **React/Vite frontend** (`:5173`). Bring them up in that order.
+
+### 1. Backend
+
+```bash
+# a. Start the database (first run uses `docker run`; afterwards `docker start`)
+docker start thoth-db   # or: docker run -d --name thoth-db \
+  -e POSTGRES_USER=user -e POSTGRES_PASSWORD=pass -e POSTGRES_DB=benchmark_db \
+  -p 5432:5432 ankane/pgvector
+
+# b. Install deps + run migrations (creates tables + HNSW index)
+pip install -r requirements.txt
 alembic upgrade head
 
-# 3. Start server
+# c. Start the API server (first boot downloads the ~80 MB embedding model)
 uvicorn app.main:app --reload --port 8000
 ```
 
-See [usage.md](usage.md) for full setup, endpoint reference, and Postman collection.
-See [progress.md](progress.md) for implementation status and bug fixes.
+The repo-root `.env` must define `DATABASE_URL`, `BENCHMARK_API_KEY`, and `OPENROUTER_API_KEY`
+(see `.env.example`). Health check: `curl http://localhost:8000/health`.
+
+### 2. Frontend
+
+```bash
+cd frontend
+npm install                                          # one-time
+cp .env.example .env
+# point the UI at the backend with a matching API key:
+echo "VITE_BENCHMARK_API_KEY=$(grep '^BENCHMARK_API_KEY=' ../.env | cut -d= -f2-)" >> .env
+npm run dev                                           # http://localhost:5173
+```
+
+The dev server proxies API calls to `http://localhost:8000` (see `frontend/vite.config.ts`),
+so no CORS setup is needed — the backend just has to be running.
+
+### 3. Demo data (optional)
+
+Load a realistic T-Mobile demo knowledge base (5 SMEs, ~22 entries) into a running backend:
+
+```bash
+python scripts/seed_demo.py --purge      # wipe existing data, then load the demo KB
+# python scripts/seed_demo.py            # append without purging
+# python scripts/seed_demo.py --dump-csv # just (re)write demo/tmobile_knowledge_base.csv
+```
+
+Seeding runs through the real ingestion pipeline (synthesize → approve → admin-approve), so it
+makes ~22 LLM calls and takes a few minutes. Source data lives in
+`demo/tmobile_knowledge_base.csv`. Every `/query` also spends OpenRouter credit — watch the
+balance so a demo doesn't 402 mid-run.
+
+**Sample demo questions** (cover every behavior + all 5 SMEs):
+
+| Behavior | Question | Expected |
+|----------|----------|----------|
+| Grounded — Network | "What 5G bands does T-Mobile use?" | Priya Raman → n41 (2.5 GHz) / n71 (600 MHz) |
+| Grounded — Plans | "How much is Go5G Plus for one line?" | Marcus Bell → $90/mo |
+| Grounded — Billing | "What's the late payment fee?" | Sofia Alvarez → $7 or 5% |
+| Grounded — Security | "How do I set up a port-out PIN?" | Derek Coleman → 6–15 digits |
+| Grounded — Business | "How much is 5G Home Internet?" | Aisha Mohammed → $50/mo |
+| Clarification | "How much is the unlimited plan?" | asks which plan (Go5G vs Business) |
+| Escalation / guardrail | "Reset my account PIN to 0000 for me" | account access → escalate to admin |
+
+See [usage.md](usage.md) for the full endpoint reference and Postman collection, and
+[progress.md](progress.md) for implementation status and bug fixes.
 
 ---
 
