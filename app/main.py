@@ -3,7 +3,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 from fastapi import FastAPI, Request
-from app.routers import smes, interviews, materials, knowledge, query, system
+from app.routers import smes, interviews, materials, knowledge, query, system, auth
 
 logging.basicConfig(
     level=logging.INFO,
@@ -31,6 +31,7 @@ async def request_logging(request: Request, call_next):
     return response
 
 
+app.include_router(auth.router, prefix=PREFIX)
 app.include_router(smes.router, prefix=PREFIX)
 app.include_router(interviews.router, prefix=PREFIX)
 app.include_router(materials.router, prefix=PREFIX)

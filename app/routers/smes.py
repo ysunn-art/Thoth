@@ -1,12 +1,14 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_db
-from app.core.auth import verify_api_key
+from app.core.auth import get_current_user, require_admin
 from app.models.schemas.sme import SMECreate, SMEResponse, SMEListResponse
 from app.services.sme_service import SMEService
 from app.repositories.sme_repo import SMERepository
 
-router = APIRouter(dependencies=[Depends(verify_api_key)])
+# All endpoints require an authenticated user (JWT or service token).
+# POST /smes additionally requires admin via per-route dependency.
+router = APIRouter(dependencies=[Depends(get_current_user)])
 
 
 def _to_response(sme) -> SMEResponse:
@@ -20,7 +22,12 @@ def _to_response(sme) -> SMEResponse:
     )
 
 
-@router.post("/smes", status_code=201, response_model=SMEResponse)
+@router.post(
+    "/smes",
+    status_code=201,
+    response_model=SMEResponse,
+    dependencies=[Depends(require_admin)],
+)
 async def create_sme(data: SMECreate, db: AsyncSession = Depends(get_db)):
     sme = await SMEService(SMERepository(db)).create_sme(data)
     return _to_response(sme)

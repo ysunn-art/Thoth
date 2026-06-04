@@ -22,3 +22,7 @@ def guard_not_rejected(current_status: str):
             status_code=409,
             detail={"error": "Entry is already rejected", "code": "ALREADY_REJECTED"},
         )
+
+
+def raise_forbidden(reason: str):
+    raise HTTPException(status_code=403, detail={"error": reason, "code": "FORBIDDEN"})

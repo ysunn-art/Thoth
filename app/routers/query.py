@@ -1,14 +1,14 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_db
-from app.core.auth import verify_api_key
+from app.core.auth import get_current_user
 from app.models.schemas.query import QueryRequest, QueryResponse
 from app.services.query_service import QueryService
 from app.repositories.sme_repo import SMERepository
 from app.repositories.knowledge_repo import KnowledgeRepository
 from app.repositories.vector_repo import VectorRepository
 
-router = APIRouter(dependencies=[Depends(verify_api_key)])
+router = APIRouter(dependencies=[Depends(get_current_user)])
 
 
 @router.post("/query", response_model=QueryResponse)

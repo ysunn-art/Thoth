@@ -2,13 +2,13 @@ from fastapi import APIRouter, Depends, UploadFile, File, Form
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_db
-from app.core.auth import verify_api_key
+from app.core.auth import get_current_user, require_sme_owner_or_admin
 from app.models.schemas.material import MaterialResponse, MaterialSummary, MaterialListResponse
 from app.services.material_service import MaterialService
 from app.repositories.material_repo import MaterialRepository
 from app.repositories.sme_repo import SMERepository
 
-router = APIRouter(dependencies=[Depends(verify_api_key)])
+router = APIRouter(dependencies=[Depends(get_current_user)])
 
 
 def _to_response(material) -> MaterialResponse:
@@ -32,7 +32,12 @@ def _to_summary(material) -> MaterialSummary:
     )
 
 
-@router.post("/smes/{sme_id}/materials", status_code=201, response_model=MaterialResponse)
+@router.post(
+    "/smes/{sme_id}/materials",
+    status_code=201,
+    response_model=MaterialResponse,
+    dependencies=[Depends(require_sme_owner_or_admin)],
+)
 async def upload_material(
     sme_id: str,
     file: UploadFile = File(...),

@@ -10,6 +10,7 @@ import app.models.db.turn
 import app.models.db.material
 import app.models.db.knowledge_entry
 import app.models.db.knowledge_chunk
+import app.models.db.user
 
 config = context.config
 config.set_main_option("sqlalchemy.url", settings.database_url)
